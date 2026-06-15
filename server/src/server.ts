@@ -17,6 +17,7 @@ interface PlayerConnection {
 
 const players: Map<string, PlayerConnection> = new Map()
 const roomConnections: Map<string, Set<string>> = new Map()
+const gameStateIntervals: Map<string, NodeJS.Timeout> = new Map()
 
 async function main() {
   await connectRedis()
@@ -150,10 +151,11 @@ async function handleMessage(playerId: string, message: ClientMessage): Promise<
 
     case 'leave_room': {
       if (player.roomId) {
-        await roomManager.leaveRoom(player.roomId, playerId)
-        removeFromRoomConnections(player.roomId, playerId)
+        const roomId = player.roomId
+        await roomManager.leaveRoom(roomId, playerId)
+        removeFromRoomConnections(roomId, playerId)
         
-        broadcastToRoom(player.roomId, {
+        broadcastToRoom(roomId, {
           type: 'player_left',
           payload: { playerId },
         })
@@ -201,6 +203,12 @@ async function handleMessage(playerId: string, message: ClientMessage): Promise<
         const gameState = gameEngine.getGameState(player.roomId)
         if (gameState) {
           gameEngine.addPlayer(player.roomId, playerId, player.name, classType)
+          
+          // 立即推送更新后的游戏状态给所有房间玩家
+          broadcastToRoom(player.roomId, {
+            type: 'game_state',
+            payload: gameState as unknown as Record<string, unknown>,
+          })
         }
         
         broadcastToRoom(player.roomId, {
@@ -256,15 +264,19 @@ async function handleDisconnect(playerId: string): Promise<void> {
   if (!player) return
 
   if (player.roomId) {
-    await roomManager.leaveRoom(player.roomId, playerId)
-    removeFromRoomConnections(player.roomId, playerId)
+    const roomId = player.roomId
+    await roomManager.leaveRoom(roomId, playerId)
+    removeFromRoomConnections(roomId, playerId)
     
-    broadcastToRoom(player.roomId, {
+    broadcastToRoom(roomId, {
       type: 'player_disconnected',
       payload: { playerId },
     })
     
     await sendRoomList()
+    
+    // 检查房间是否为空，如果为空则清理interval
+    checkAndCleanupRoom(roomId)
   }
 
   players.delete(playerId)
@@ -320,15 +332,52 @@ async function sendRoomList(): Promise<void> {
 }
 
 function startGameStateSync(roomId: string): void {
-  setInterval(() => {
+  // 立即推送一次游戏状态
+  const initialState = gameEngine.getGameState(roomId)
+  if (initialState) {
+    broadcastToRoom(roomId, {
+      type: 'game_state',
+      payload: initialState as unknown as Record<string, unknown>,
+    })
+  }
+  
+  // 清除已存在的interval（防止重复）
+  stopGameStateSync(roomId)
+  
+  // 启动定期同步
+  const interval = setInterval(() => {
     const gameState = gameEngine.getGameState(roomId)
     if (gameState) {
+      // 检查游戏是否已结束
+      if (gameState.gameOver) {
+        stopGameStateSync(roomId)
+        return
+      }
+      
       broadcastToRoom(roomId, {
         type: 'game_state',
-        payload: gameState as Record<string, unknown>,
+        payload: gameState as unknown as Record<string, unknown>,
       })
     }
   }, 100)
+  
+  gameStateIntervals.set(roomId, interval)
+}
+
+function stopGameStateSync(roomId: string): void {
+  const interval = gameStateIntervals.get(roomId)
+  if (interval) {
+    clearInterval(interval)
+    gameStateIntervals.delete(roomId)
+  }
+}
+
+function checkAndCleanupRoom(roomId: string): void {
+  // 停止游戏状态同步
+  stopGameStateSync(roomId)
+  
+  // 销毁游戏状态
+  gameEngine.destroyGameState(roomId)
 }
 
 main().catch(console.error)

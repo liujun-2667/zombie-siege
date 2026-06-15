@@ -1,0 +1,44 @@
+:root {
+  --color-primary: #2d5a3d;
+  --color-primary-dark: #1a3d27;
+  --color-secondary: #8b4513;
+  --color-accent: #ff6b35;
+  --color-danger: #dc2626;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-dark: #1a1a2e;
+  --color-dark-light: #16213e;
+  --color-gray: #4a5568;
+  --color-light: #f7f7f7;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: var(--color-dark);
+  color: var(--color-light);
+  min-height: 100vh;
+}
+
+#__nuxt {
+  min-height: 100vh;
+}
+
+@layer utilities {
+  .text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  }
+  
+  .glow-primary {
+    box-shadow: 0 0 15px rgba(45, 90, 61, 0.5);
+  }
+  
+  .glow-accent {
+    box-shadow: 0 0 15px rgba(255, 107, 53, 0.5);
+  }
+}

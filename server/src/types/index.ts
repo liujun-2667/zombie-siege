@@ -122,6 +122,67 @@ export interface Room {
   currentNight: number
 }
 
+export interface ThreatGrid {
+  grid: number[][]
+  lastUpdate: number
+}
+
+export interface FormationPosition {
+  playerId: string
+  x: number
+  y: number
+}
+
+export interface FormationPreset {
+  id: string
+  name: string
+  positions: FormationPosition[]
+}
+
+export interface PlayerStats {
+  playerId: string
+  playerName: string
+  classType: PlayerClass
+  totalDamage: number
+  kills: {
+    normal: number
+    special: number
+    boss: number
+  }
+  damageTaken: number
+  healingDone: number
+  structuresBuilt: number
+  deaths: number
+  maxKillStreak: number
+  currentKillStreak: number
+  dpsHistory: number[]
+}
+
+export interface DamageTimePoint {
+  period: string
+  day: number
+  isNight: boolean
+  damage: number
+}
+
+export interface GameStats {
+  playerStats: Map<string, PlayerStats>
+  damageTimeSeries: DamageTimePoint[]
+  resourceConsumption: {
+    ammoPerMinute: number
+    medkitPerMinute: number
+  }
+  totalZombiesKilled: number
+  totalResourcesCollected: number
+}
+
+export interface DeploymentOrder {
+  playerId: string
+  targetX: number
+  targetY: number
+  active: boolean
+}
+
 export interface GameState {
   roomId: string
   day: number
@@ -141,6 +202,9 @@ export interface GameState {
   }
   gameOver: boolean
   victory: boolean
+  threatGrid: ThreatGrid
+  currentFormation: FormationPosition[] | null
+  deploymentOrders: DeploymentOrder[]
 }
 
 export interface ClientMessage {

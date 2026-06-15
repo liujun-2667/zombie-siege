@@ -294,6 +294,116 @@ async function handleMessage(playerId: string, message: ClientMessage): Promise<
       break
     }
 
+    case 'deploy_formation': {
+      const { positions } = message.payload as { positions: Array<{ playerId: string; x: number; y: number }> }
+      if (player.roomId) {
+        gameEngine.deployFormation(player.roomId, positions)
+        
+        broadcastToRoom(player.roomId, {
+          type: 'formation_deployed',
+          payload: { positions },
+        })
+      }
+      break
+    }
+
+    case 'save_formation_preset': {
+      const { name, positions } = message.payload as { name: string; positions: Array<{ playerId: string; x: number; y: number }> }
+      if (player.roomId) {
+        const success = gameEngine.saveFormationPreset(player.roomId, name, positions)
+        sendToPlayer(playerId, {
+          type: 'save_formation_result',
+          payload: { success },
+        })
+        
+        if (success) {
+          broadcastToRoom(player.roomId, {
+            type: 'formation_presets_updated',
+            payload: { presets: gameEngine.getFormationPresets(player.roomId) },
+          })
+        }
+      }
+      break
+    }
+
+    case 'load_formation_preset': {
+      const { presetId } = message.payload as { presetId: string }
+      if (player.roomId) {
+        const positions = gameEngine.loadFormationPreset(player.roomId, presetId)
+        if (positions) {
+          gameEngine.deployFormation(player.roomId, positions)
+          
+          broadcastToRoom(player.roomId, {
+            type: 'formation_deployed',
+            payload: { positions },
+          })
+        }
+      }
+      break
+    }
+
+    case 'get_formation_presets': {
+      if (player.roomId) {
+        const presets = gameEngine.getFormationPresets(player.roomId)
+        sendToPlayer(playerId, {
+          type: 'formation_presets',
+          payload: { presets },
+        })
+      }
+      break
+    }
+
+    case 'delete_formation_preset': {
+      const { presetId } = message.payload as { presetId: string }
+      if (player.roomId) {
+        const success = gameEngine.deleteFormationPreset(player.roomId, presetId)
+        sendToPlayer(playerId, {
+          type: 'delete_formation_result',
+          payload: { success },
+        })
+        
+        if (success) {
+          broadcastToRoom(player.roomId, {
+            type: 'formation_presets_updated',
+            payload: { presets: gameEngine.getFormationPresets(player.roomId) },
+          })
+        }
+      }
+      break
+    }
+
+    case 'cancel_deployment': {
+      const { targetPlayerId } = message.payload as { targetPlayerId?: string }
+      if (player.roomId) {
+        gameEngine.cancelDeployment(player.roomId, targetPlayerId)
+        
+        broadcastToRoom(player.roomId, {
+          type: 'deployment_canceled',
+          payload: { targetPlayerId },
+        })
+      }
+      break
+    }
+
+    case 'get_game_stats': {
+      if (player.roomId) {
+        const stats = gameEngine.getGameStats(player.roomId)
+        sendToPlayer(playerId, {
+          type: 'game_stats',
+          payload: { 
+            stats: stats ? {
+              playerStats: Array.from(stats.playerStats.entries()).map(([id, stat]) => ({ ...stat })),
+              damageTimeSeries: stats.damageTimeSeries,
+              resourceConsumption: stats.resourceConsumption,
+              totalZombiesKilled: stats.totalZombiesKilled,
+              totalResourcesCollected: stats.totalResourcesCollected,
+            } : null 
+          },
+        })
+      }
+      break
+    }
+
     default:
       console.log('Unknown message type:', message.type)
   }

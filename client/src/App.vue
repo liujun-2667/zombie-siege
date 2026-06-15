@@ -9,6 +9,7 @@
       @build="handleBuild"
       @upgrade-weapon="handleUpgradeWeapon"
       @select-skill="handleSelectSkill"
+      @toggle-command-panel="handleToggleCommandPanel"
     />
     
     <div v-else-if="gameStore.currentRoom" class="min-h-screen">
@@ -74,12 +75,24 @@
       @restart="handleRestart"
       @home="handleBackToHome"
     />
+    
+    <CommandPanel
+      :visible="gameStore.showCommandPanel"
+      :game-state="gameStore.gameState"
+      :presets="gameStore.formationPresets"
+      :game-stats="gameStore.gameStats"
+      @close="handleCloseCommandPanel"
+      @deploy-formation="handleDeployFormation"
+      @save-preset="handleSavePreset"
+      @load-preset="handleLoadPreset"
+      @delete-preset="handleDeletePreset"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { gameStore, setPlayerName, setPlayerClass, resetGame, setCurrentRoom } from './stores/gameStore'
+import { gameStore, setPlayerName, setPlayerClass, resetGame, setCurrentRoom, setShowCommandPanel } from './stores/gameStore'
 import { useWebSocket } from './composables/useWebSocket'
 import type { Room, PlayerClass } from './types'
 
@@ -89,8 +102,9 @@ import JoinRoomModal from './components/JoinRoomModal.vue'
 import RoomWaiting from './components/RoomWaiting.vue'
 import GameCanvas from './components/GameCanvas.vue'
 import GameOverModal from './components/GameOverModal.vue'
+import CommandPanel from './components/CommandPanel.vue'
 
-const { createRoom, joinRoom, quickMatch, leaveRoom, startGame, selectClass, move, shoot, scavenge, build, upgradeWeapon, selectSkill } = useWebSocket()
+const { createRoom, joinRoom, quickMatch, leaveRoom, startGame, selectClass, move, shoot, scavenge, build, upgradeWeapon, selectSkill, deployFormation, saveFormationPreset, loadFormationPreset, deleteFormationPreset, getFormationPresets, getGameStats } = useWebSocket()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
@@ -155,6 +169,34 @@ const handleUpgradeWeapon = (weaponType: string) => {
 
 const handleSelectSkill = (skillId: string) => {
   selectSkill(skillId)
+}
+
+const handleToggleCommandPanel = () => {
+  setShowCommandPanel(!gameStore.showCommandPanel)
+  if (gameStore.showCommandPanel) {
+    getFormationPresets()
+    getGameStats()
+  }
+}
+
+const handleCloseCommandPanel = () => {
+  setShowCommandPanel(false)
+}
+
+const handleDeployFormation = (positions: Array<{ playerId: string; x: number; y: number }>) => {
+  deployFormation(positions)
+}
+
+const handleSavePreset = (name: string, positions: Array<{ playerId: string; x: number; y: number }>) => {
+  saveFormationPreset(name, positions)
+}
+
+const handleLoadPreset = (presetId: string) => {
+  loadFormationPreset(presetId)
+}
+
+const handleDeletePreset = (presetId: string) => {
+  deleteFormationPreset(presetId)
 }
 
 const handleRestart = () => {

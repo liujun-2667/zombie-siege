@@ -1,4 +1,4 @@
-import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode } from '../types'
+import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode, GameStats, PlayerStats, ThreatGrid, FormationPreset, FormationPosition, DeploymentOrder } from '../types'
 import { GAME_CONFIG, PLAYER_CLASSES, ZOMBIE_CONFIG, STRUCTURE_CONFIG, WEAPON_CONFIG, SKILL_TREE_CONFIG } from '../config/gameConfig'
 import { generateId, getDistance, getRandomSpawnPosition, clamp } from '../utils/helpers'
 import { roomManager } from '../managers/roomManager'
@@ -7,6 +7,10 @@ export class GameEngine {
   private gameStates: Map<string, GameState> = new Map()
   private gameLoops: Map<string, number> = new Map()
   private lastUpdate: Map<string, number> = new Map()
+  private gameStats: Map<string, GameStats> = new Map()
+  private formationPresets: Map<string, FormationPreset[]> = new Map()
+  private threatGridUpdates: Map<string, number> = new Map()
+  private lastResourceSnapshot: Map<string, { ammo: number; medkit: number; time: number }> = new Map()
 
   createGameState(roomId: string): GameState {
     const centerX = GAME_CONFIG.MAP_WIDTH / 2
@@ -28,6 +32,23 @@ export class GameEngine {
       { id: generateId(), type: 'command', position: { x: centerX, y: centerY }, health: 100, maxHealth: 100, level: 1 },
     ]
 
+    const threatGrid: ThreatGrid = {
+      grid: Array(10).fill(null).map(() => Array(10).fill(0)),
+      lastUpdate: Date.now(),
+    }
+
+    this.gameStats.set(roomId, {
+      playerStats: new Map(),
+      damageTimeSeries: [],
+      resourceConsumption: { ammoPerMinute: 0, medkitPerMinute: 0 },
+      totalZombiesKilled: 0,
+      totalResourcesCollected: 0,
+    })
+
+    this.formationPresets.set(roomId, [])
+
+    this.lastResourceSnapshot.set(roomId, { ammo: 50, medkit: 10, time: Date.now() })
+
     return {
       roomId,
       day: 1,
@@ -42,6 +63,9 @@ export class GameEngine {
       resources: { ammo: 50, wood: 50, iron: 30, medkit: 10 },
       gameOver: false,
       victory: false,
+      threatGrid,
+      currentFormation: null,
+      deploymentOrders: [],
     }
   }
 
@@ -124,6 +148,24 @@ export class GameEngine {
       resourcesCollected: 0,
     }
 
+    const stats = this.gameStats.get(roomId)
+    if (stats) {
+      stats.playerStats.set(playerId, {
+        playerId,
+        playerName,
+        classType,
+        totalDamage: 0,
+        kills: { normal: 0, special: 0, boss: 0 },
+        damageTaken: 0,
+        healingDone: 0,
+        structuresBuilt: 0,
+        deaths: 0,
+        maxKillStreak: 0,
+        currentKillStreak: 0,
+        dpsHistory: [],
+      })
+    }
+
     gameState.players.push(player)
     return player
   }
@@ -200,9 +242,31 @@ export class GameEngine {
         hitZombies.push(zombie)
         zombie.health -= damage
         
+        const stats = this.gameStats.get(roomId)
+        if (stats) {
+          const playerStats = stats.playerStats.get(playerId)
+          if (playerStats) {
+            playerStats.totalDamage += damage
+            playerStats.dpsHistory.push(damage)
+            if (playerStats.dpsHistory.length > 50) {
+              playerStats.dpsHistory.shift()
+            }
+          }
+        }
+
         const burnSkill = player.skillTree.find(s => s.id === 'assault_2b' && s.isSelected)
         if (burnSkill) {
           zombie.health -= 5
+          if (stats) {
+            const playerStats = stats.playerStats.get(playerId)
+            if (playerStats) {
+              playerStats.totalDamage += 5
+              playerStats.dpsHistory.push(5)
+              if (playerStats.dpsHistory.length > 50) {
+                playerStats.dpsHistory.shift()
+              }
+            }
+          }
         }
 
         if (zombie.health <= 0) {
@@ -298,10 +362,34 @@ export class GameEngine {
     gameState.resources.iron += reward.iron
     gameState.resources.medkit += reward.medkit
 
+    const stats = this.gameStats.get(roomId)
+    if (stats) {
+      stats.totalZombiesKilled += 1
+    }
+
     if (killerId) {
       const killer = gameState.players.find(p => p.id === killerId)
       if (killer) {
         const isSpecial = zombie.type !== 'normal'
+        const isBoss = zombie.type === 'boss'
+        
+        if (stats) {
+          const playerStats = stats.playerStats.get(killerId)
+          if (playerStats) {
+            if (isBoss) {
+              playerStats.kills.boss += 1
+            } else if (isSpecial) {
+              playerStats.kills.special += 1
+            } else {
+              playerStats.kills.normal += 1
+            }
+            playerStats.currentKillStreak += 1
+            if (playerStats.currentKillStreak > playerStats.maxKillStreak) {
+              playerStats.maxKillStreak = playerStats.currentKillStreak
+            }
+          }
+        }
+
         if (isSpecial) {
           killer.specialZombieKills += 1
           killer.skillPoints += 1
@@ -343,6 +431,11 @@ export class GameEngine {
         }
 
         player.resourcesCollected += amount
+
+        const stats = this.gameStats.get(roomId)
+        if (stats) {
+          stats.totalResourcesCollected += amount
+        }
         break
       }
     }
@@ -381,6 +474,15 @@ export class GameEngine {
     }
 
     gameState.structures.push(structure)
+
+    const stats = this.gameStats.get(roomId)
+    if (stats) {
+      const playerStats = stats.playerStats.get(playerId)
+      if (playerStats) {
+        playerStats.structuresBuilt += 1
+      }
+    }
+
     return true
   }
 
@@ -418,12 +520,33 @@ export class GameEngine {
     this.updatePlayers(roomId)
     this.updateZombies(roomId)
     this.updateTurrets(roomId)
+    
+    this.updateThreatGrid(roomId)
+    this.updateResourceConsumption(roomId)
+    this.updateDeploymentOrders(roomId)
+
     this.checkGameOver(roomId)
   }
 
   private switchTimeOfDay(roomId: string): void {
     const gameState = this.gameStates.get(roomId)
     if (!gameState) return
+
+    const stats = this.gameStats.get(roomId)
+    if (stats) {
+      const period = gameState.timeOfDay === 'day' ? 'night' : 'day'
+      const dayNum = gameState.timeOfDay === 'day' ? gameState.day : gameState.day - 1
+      let totalDamage = 0
+      stats.playerStats.forEach(ps => {
+        totalDamage += ps.totalDamage
+      })
+      stats.damageTimeSeries.push({
+        period: `第${dayNum}天${period === 'day' ? '白天' : '夜晚'}`,
+        day: dayNum,
+        isNight: period === 'night',
+        damage: Math.round(totalDamage),
+      })
+    }
 
     if (gameState.timeOfDay === 'day') {
       gameState.timeOfDay = 'night'
@@ -657,6 +780,18 @@ export class GameEngine {
         const damage = zombie.damage * (1 - player.armor)
         player.health -= damage
 
+        const stats = this.gameStats.get(roomId)
+        if (stats) {
+          const playerStats = stats.playerStats.get(player.id)
+          if (playerStats) {
+            playerStats.damageTaken += damage
+            if (player.health <= 0) {
+              playerStats.deaths += 1
+              playerStats.currentKillStreak = 0
+            }
+          }
+        }
+
         if (player.health <= 0) {
           player.isDead = true
           player.deathTime = Date.now()
@@ -752,9 +887,169 @@ export class GameEngine {
     return this.gameStates.get(roomId)
   }
 
+  getGameStats(roomId: string): GameStats | undefined {
+    return this.gameStats.get(roomId)
+  }
+
+  private updateThreatGrid(roomId: string): void {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return
+
+    const now = Date.now()
+    const lastUpdate = this.threatGridUpdates.get(roomId) || 0
+    if (now - lastUpdate < 1000) return
+
+    this.threatGridUpdates.set(roomId, now)
+
+    const gridSize = 80
+    const grid: number[][] = Array(10).fill(null).map(() => Array(10).fill(0))
+
+    for (const zombie of gameState.zombies) {
+      const gridX = Math.floor(zombie.position.x / gridSize)
+      const gridY = Math.floor(zombie.position.y / gridSize)
+
+      if (gridX >= 0 && gridX < 10 && gridY >= 0 && gridY < 10) {
+        let threatValue = 0
+        switch (zombie.type) {
+          case 'normal': threatValue = 1; break
+          case 'runner': threatValue = 2; break
+          case 'tank': threatValue = 5; break
+          case 'bomber': threatValue = 3; break
+          case 'spitter': threatValue = 3; break
+          case 'summoner': threatValue = 4; break
+          case 'boss': threatValue = 10; break
+        }
+        grid[gridY][gridX] += threatValue
+      }
+    }
+
+    for (let y = 0; y < 10; y++) {
+      for (let x = 0; x < 10; x++) {
+        grid[y][x] = Math.min(100, Math.max(0, grid[y][x]))
+      }
+    }
+
+    gameState.threatGrid = { grid, lastUpdate: now }
+  }
+
+  private updateResourceConsumption(roomId: string): void {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return
+
+    const stats = this.gameStats.get(roomId)
+    if (!stats) return
+
+    const snapshot = this.lastResourceSnapshot.get(roomId)
+    if (!snapshot) return
+
+    const now = Date.now()
+    const elapsedMinutes = (now - snapshot.time) / 60000
+
+    if (elapsedMinutes >= 1) {
+      const ammoDiff = snapshot.ammo - gameState.resources.ammo
+      const medkitDiff = snapshot.medkit - gameState.resources.medkit
+
+      stats.resourceConsumption.ammoPerMinute = Math.max(0, ammoDiff / elapsedMinutes)
+      stats.resourceConsumption.medkitPerMinute = Math.max(0, medkitDiff / elapsedMinutes)
+
+      this.lastResourceSnapshot.set(roomId, {
+        ammo: gameState.resources.ammo,
+        medkit: gameState.resources.medkit,
+        time: now,
+      })
+    }
+  }
+
+  private updateDeploymentOrders(roomId: string): void {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return
+
+    gameState.deploymentOrders = gameState.deploymentOrders.filter(order => {
+      const player = gameState.players.find(p => p.id === order.playerId)
+      if (!player || player.isDead) return false
+
+      const dx = order.targetX - player.position.x
+      const dy = order.targetY - player.position.y
+      const distance = Math.sqrt(dx * dx + dy * dy)
+
+      return distance > 10
+    })
+  }
+
+  deployFormation(roomId: string, positions: FormationPosition[]): void {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return
+
+    gameState.currentFormation = positions
+
+    const orders: DeploymentOrder[] = []
+    for (const pos of positions) {
+      const player = gameState.players.find(p => p.id === pos.playerId)
+      if (player && !player.isDead) {
+        orders.push({
+          playerId: pos.playerId,
+          targetX: pos.x,
+          targetY: pos.y,
+          active: true,
+        })
+      }
+    }
+    gameState.deploymentOrders = orders
+  }
+
+  saveFormationPreset(roomId: string, name: string, positions: FormationPosition[]): boolean {
+    const presets = this.formationPresets.get(roomId)
+    if (!presets) return false
+
+    if (presets.length >= 3) return false
+
+    presets.push({
+      id: generateId(),
+      name,
+      positions: [...positions],
+    })
+    return true
+  }
+
+  loadFormationPreset(roomId: string, presetId: string): FormationPosition[] | null {
+    const presets = this.formationPresets.get(roomId)
+    if (!presets) return null
+
+    const preset = presets.find(p => p.id === presetId)
+    return preset ? [...preset.positions] : null
+  }
+
+  getFormationPresets(roomId: string): FormationPreset[] {
+    return this.formationPresets.get(roomId) || []
+  }
+
+  deleteFormationPreset(roomId: string, presetId: string): boolean {
+    const presets = this.formationPresets.get(roomId)
+    if (!presets) return false
+
+    const initialLength = presets.length
+    this.formationPresets.set(roomId, presets.filter(p => p.id !== presetId))
+    return presets.length < initialLength
+  }
+
+  cancelDeployment(roomId: string, playerId?: string): void {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return
+
+    if (playerId) {
+      gameState.deploymentOrders = gameState.deploymentOrders.filter(o => o.playerId !== playerId)
+    } else {
+      gameState.deploymentOrders = []
+    }
+  }
+
   destroyGameState(roomId: string): void {
     this.stopGame(roomId)
     this.gameStates.delete(roomId)
+    this.gameStats.delete(roomId)
+    this.formationPresets.delete(roomId)
+    this.threatGridUpdates.delete(roomId)
+    this.lastResourceSnapshot.delete(roomId)
   }
 }
 

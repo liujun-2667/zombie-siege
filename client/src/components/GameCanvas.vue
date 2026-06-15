@@ -158,6 +158,7 @@ const emit = defineEmits<{
   (e: 'build'): void
   (e: 'upgradeWeapon', weaponType: WeaponType): void
   (e: 'selectSkill', skillId: string): void
+  (e: 'toggleCommandPanel'): void
 }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -232,6 +233,10 @@ const handleKeyDown = (e: KeyboardEvent) => {
   if (e.key === 'Tab') {
     e.preventDefault()
     showSkillTree.value = !showSkillTree.value
+  }
+  if (e.key === 'f' || e.key === 'F') {
+    e.preventDefault()
+    emit('toggleCommandPanel')
   }
 }
 
@@ -486,6 +491,44 @@ const drawPlayers = (ctx: CanvasRenderingContext2D) => {
     ctx.fillStyle = player.isDead ? '#6b7280' : '#22c55e'
     const healthPercent = player.health / player.maxHealth
     ctx.fillRect(player.position.x - 15, player.position.y - 28, 30 * healthPercent, 4)
+
+    const order = props.gameState.deploymentOrders.find(o => o.playerId === player.id)
+    if (order && order.active && !player.isDead) {
+      const dx = order.targetX - player.position.x
+      const dy = order.targetY - player.position.y
+      const distance = Math.sqrt(dx * dx + dy * dy)
+
+      if (distance > 10) {
+        const angle = Math.atan2(dy, dx)
+        const arrowLength = Math.min(40, distance * 0.5)
+        const arrowStartX = player.position.x
+        const arrowStartY = player.position.y - 35
+        const arrowEndX = arrowStartX + Math.cos(angle) * arrowLength
+        const arrowEndY = arrowStartY + Math.sin(angle) * arrowLength
+
+        ctx.strokeStyle = '#ffd700'
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        ctx.moveTo(arrowStartX, arrowStartY)
+        ctx.lineTo(arrowEndX, arrowEndY)
+        ctx.stroke()
+
+        const headLength = 10
+        const headAngle = Math.PI / 6
+        ctx.beginPath()
+        ctx.moveTo(arrowEndX, arrowEndY)
+        ctx.lineTo(
+          arrowEndX - Math.cos(angle - headAngle) * headLength,
+          arrowEndY - Math.sin(angle - headAngle) * headLength
+        )
+        ctx.moveTo(arrowEndX, arrowEndY)
+        ctx.lineTo(
+          arrowEndX - Math.cos(angle + headAngle) * headLength,
+          arrowEndY - Math.sin(angle + headAngle) * headLength
+        )
+        ctx.stroke()
+      }
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { GameState, PlayerState, ZombieState, Room, PlayerClass } from '../types'
+import type { GameState, PlayerState, ZombieState, Room, PlayerClass, FormationPreset, GameStats } from '../types'
 
 export interface GameStore {
   rooms: Room[]
@@ -12,6 +12,11 @@ export interface GameStore {
   showClassSelection: boolean
   showGameOver: boolean
   gameResult: 'victory' | 'defeat' | null
+  showCommandPanel: boolean
+  commandPanelTab: 'situation' | 'formation' | 'stats'
+  formationPresets: FormationPreset[]
+  gameStats: GameStats | null
+  postMatchStats: GameStats | null
 }
 
 export const gameStore = reactive<GameStore>({
@@ -25,6 +30,11 @@ export const gameStore = reactive<GameStore>({
   showClassSelection: false,
   showGameOver: false,
   gameResult: null,
+  showCommandPanel: false,
+  commandPanelTab: 'situation',
+  formationPresets: [],
+  gameStats: null,
+  postMatchStats: null,
 })
 
 export function setRooms(rooms: Room[]) {
@@ -64,10 +74,35 @@ export function setShowGameOver(show: boolean, result?: 'victory' | 'defeat') {
   gameStore.gameResult = result || null
 }
 
+export function setShowCommandPanel(show: boolean) {
+  gameStore.showCommandPanel = show
+}
+
+export function setCommandPanelTab(tab: 'situation' | 'formation' | 'stats') {
+  gameStore.commandPanelTab = tab
+}
+
+export function setFormationPresets(presets: FormationPreset[]) {
+  gameStore.formationPresets = presets
+}
+
+export function setGameStats(stats: GameStats | null) {
+  gameStore.gameStats = stats
+}
+
+export function setPostMatchStats(stats: GameStats | null) {
+  gameStore.postMatchStats = stats
+}
+
 export function resetGame() {
   gameStore.gameState = null
   gameStore.playerClass = null
   gameStore.showClassSelection = false
   gameStore.showGameOver = false
   gameStore.gameResult = null
+  gameStore.showCommandPanel = false
+  gameStore.commandPanelTab = 'situation'
+  gameStore.formationPresets = []
+  gameStore.gameStats = null
+  gameStore.postMatchStats = null
 }

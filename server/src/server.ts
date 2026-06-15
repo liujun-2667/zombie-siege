@@ -184,6 +184,19 @@ async function handleMessage(playerId: string, message: ClientMessage): Promise<
           await roomManager.updateRoomStatus(player.roomId, 'playing')
           gameEngine.startGame(player.roomId)
           
+          const gameState = gameEngine.getGameState(player.roomId)
+          if (gameState) {
+            for (const [pId, p] of players) {
+              if (p.roomId === player.roomId && p.classType) {
+                try {
+                  gameEngine.addPlayer(player.roomId, pId, p.name, p.classType)
+                } catch (e) {
+                  console.log('Player already added:', pId)
+                }
+              }
+            }
+          }
+          
           broadcastToRoom(player.roomId, {
             type: 'game_started',
             payload: {},
@@ -202,9 +215,12 @@ async function handleMessage(playerId: string, message: ClientMessage): Promise<
       if (player.roomId) {
         const gameState = gameEngine.getGameState(player.roomId)
         if (gameState) {
-          gameEngine.addPlayer(player.roomId, playerId, player.name, classType)
+          try {
+            gameEngine.addPlayer(player.roomId, playerId, player.name, classType)
+          } catch (e) {
+            console.log('Player already added or game state not ready:', playerId)
+          }
           
-          // 立即推送更新后的游戏状态给所有房间玩家
           broadcastToRoom(player.roomId, {
             type: 'game_state',
             payload: gameState as unknown as Record<string, unknown>,

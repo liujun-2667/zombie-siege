@@ -34,7 +34,7 @@
         </button>
         <button
           class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-light rounded-lg transition-all"
-          @click="$emit('upgradeWeapon')"
+          @click="showWeaponUpgrade = true"
         >
           武器升级
         </button>

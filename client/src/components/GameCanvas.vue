@@ -32,6 +32,12 @@
         >
           建造工事
         </button>
+        <button
+          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-light rounded-lg transition-all"
+          @click="$emit('upgradeWeapon')"
+        >
+          武器升级
+        </button>
       </div>
     </div>
     
@@ -69,14 +75,77 @@
             ></div>
           </div>
         </div>
+        <div class="text-xl">{{ getWeaponIcon(player.weapon?.type) }}</div>
+      </div>
+    </div>
+    
+    <div class="absolute top-4 left-1/2 -translate-x-1/2 bg-dark/80 rounded-lg px-4 py-2 border border-gray">
+      <div class="text-sm text-gray">按 <span class="text-primary font-bold">Tab</span> 打开技能树</div>
+    </div>
+    
+    <SkillTreePanel
+      :visible="showSkillTree"
+      :skill-tree="currentPlayer?.skillTree || []"
+      :skill-points="currentPlayer?.skillPoints || 0"
+      :class-type="currentPlayer?.classType || 'assault'"
+      @close="showSkillTree = false"
+      @select="handleSelectSkill"
+    />
+    
+    <div
+      v-if="showWeaponUpgrade"
+      class="fixed inset-0 bg-black/80 flex items-center justify-center z-50"
+      @click.self="showWeaponUpgrade = false"
+    >
+      <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-2xl font-bold text-white">武器升级</h2>
+          <button
+            class="text-gray-400 hover:text-white text-2xl font-bold"
+            @click="showWeaponUpgrade = false"
+          >
+            ×
+          </button>
+        </div>
+        
+        <div class="text-gray-400 mb-4">当前铁矿: <span class="text-gray-300 font-bold">{{ resources?.iron || 0 }}</span></div>
+        
+        <div class="space-y-4">
+          <div
+            v-for="weapon in weaponOptions"
+            :key="weapon.type"
+            class="p-4 rounded-lg border-2 transition-all"
+            :class="canUpgrade(weapon) ? 'border-primary bg-gray-800 hover:bg-gray-700 cursor-pointer' : 'border-gray-700 bg-gray-800/50 opacity-50'"
+            @click="canUpgrade(weapon) && upgradeWeapon(weapon.type)"
+          >
+            <div class="flex items-center gap-3 mb-2">
+              <span class="text-2xl">{{ weapon.icon }}</span>
+              <div>
+                <span class="font-bold text-white">{{ weapon.name }}</span>
+                <span v-if="getWeaponLevel(weapon.type) > 0" class="text-gray-400 text-sm ml-2">Lv.{{ getWeaponLevel(weapon.type) }}</span>
+              </div>
+            </div>
+            <div class="text-sm text-gray-400 space-y-1">
+              <div>伤害: {{ weapon.damage }}</div>
+              <div>射速: {{ weapon.fireRate }}/s</div>
+              <div>射程: {{ weapon.range }}px</div>
+              <div class="text-yellow-400">消耗铁矿: {{ weapon.cost }}</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="mt-4 text-gray-500 text-sm">
+          当前装备: {{ getWeaponName(currentPlayer?.weapon?.type) }} Lv.{{ currentPlayer?.weapon?.level || 0 }}
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import type { GameState, PlayerState, ZombieState, PlayerClass } from '../types'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import type { GameState, PlayerState, ZombieState, PlayerClass, WeaponType } from '../types'
+import SkillTreePanel from './SkillTreePanel.vue'
 
 const props = defineProps<{
   gameState: GameState | null
@@ -87,11 +156,15 @@ const emit = defineEmits<{
   (e: 'shoot', x: number, y: number): void
   (e: 'scavenge'): void
   (e: 'build'): void
+  (e: 'upgradeWeapon', weaponType: WeaponType): void
+  (e: 'selectSkill', skillId: string): void
 }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const minimapRef = ref<HTMLCanvasElement | null>(null)
 const mousePos = ref({ x: 0, y: 0 })
+const showSkillTree = ref(false)
+const showWeaponUpgrade = ref(false)
 let animationId: number
 
 const resources = ref<{ ammo: number; wood: number; iron: number; medkit: number } | null>(null)
@@ -99,6 +172,68 @@ const day = ref(1)
 const timeOfDay = ref<'day' | 'night'>('day')
 const timeRemaining = ref(90)
 const players = ref<PlayerState[]>([])
+
+const currentPlayer = computed(() => {
+  return players.value[0] || null
+})
+
+const weaponOptions = computed(() => [
+  { type: 'submachine' as WeaponType, name: '冲锋枪', icon: '💥', damage: 12, fireRate: 10, range: 175, cost: 50 },
+  { type: 'sniper' as WeaponType, name: '狙击枪', icon: '🎯', damage: 75, fireRate: 0.7, range: 500, cost: 50 },
+  { type: 'shotgun' as WeaponType, name: '霰弹枪', icon: '🔶', damage: 30, fireRate: 1.5, range: 120, cost: 50 },
+])
+
+const getWeaponIcon = (type?: WeaponType): string => {
+  const icons: Record<WeaponType, string> = {
+    pistol: '🔫',
+    submachine: '💥',
+    sniper: '🎯',
+    shotgun: '🔶',
+  }
+  return icons[type || 'pistol']
+}
+
+const getWeaponName = (type?: WeaponType): string => {
+  const names: Record<WeaponType, string> = {
+    pistol: '手枪',
+    submachine: '冲锋枪',
+    sniper: '狙击枪',
+    shotgun: '霰弹枪',
+  }
+  return names[type || 'pistol']
+}
+
+const getWeaponLevel = (type: WeaponType): number => {
+  if (!currentPlayer.value || currentPlayer.value.weapon.type !== type) {
+    return 0
+  }
+  return currentPlayer.value.weapon.level
+}
+
+const canUpgrade = (weapon: { type: WeaponType; cost: number }): boolean => {
+  if (!resources.value || resources.value.iron < weapon.cost) return false
+  
+  const currentLevel = getWeaponLevel(weapon.type)
+  if (currentLevel >= 3) return false
+  
+  return true
+}
+
+const upgradeWeapon = (weaponType: WeaponType) => {
+  emit('upgradeWeapon', weaponType)
+  showWeaponUpgrade.value = false
+}
+
+const handleSelectSkill = (skillId: string) => {
+  emit('selectSkill', skillId)
+}
+
+const handleKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    showSkillTree.value = !showSkillTree.value
+  }
+}
 
 watch(
   () => props.gameState,
@@ -427,9 +562,11 @@ const drawMinimap = () => {
 
 onMounted(() => {
   draw()
+  window.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(animationId)
+  window.removeEventListener('keydown', handleKeyDown)
 })
 </script>

@@ -12,9 +12,30 @@ export type StructureType = 'barracks' | 'workshop' | 'medical' | 'command' | 'w
 
 export type GatePosition = 'north' | 'south' | 'east' | 'west'
 
+export type WeaponType = 'pistol' | 'submachine' | 'sniper' | 'shotgun'
+
+export type WeaponUpgradePath = 'submachine' | 'sniper' | 'shotgun'
+
 export interface Position {
   x: number
   y: number
+}
+
+export interface WeaponState {
+  type: WeaponType
+  level: number
+  damage: number
+  fireRate: number
+  range: number
+}
+
+export interface SkillTreeNode {
+  id: string
+  name: string
+  description: string
+  level: number
+  isUnlocked: boolean
+  isSelected: boolean
 }
 
 export interface PlayerState {
@@ -27,9 +48,14 @@ export interface PlayerState {
   armor: number
   speed: number
   skills: SkillState[]
+  skillPoints: number
+  skillTree: SkillTreeNode[]
+  weapon: WeaponState
   isDead: boolean
   deathTime: number
   kills: number
+  zombieKills: number
+  specialZombieKills: number
   resourcesCollected: number
 }
 
@@ -37,6 +63,18 @@ export interface SkillState {
   name: string
   cooldown: number
   maxCooldown: number
+}
+
+export interface SkillConfig {
+  id: string
+  name: string
+  description: string
+  effect: Record<string, unknown>
+}
+
+export interface SkillTreeConfig {
+  classType: PlayerClass
+  tiers: SkillConfig[][]
 }
 
 export interface ZombieState {

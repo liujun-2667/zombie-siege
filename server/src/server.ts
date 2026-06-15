@@ -3,7 +3,7 @@ import { connectRedis } from './redis/client'
 import { roomManager } from './managers/roomManager'
 import { gameEngine } from './game/GameEngine'
 import { generateId } from './utils/helpers'
-import { ClientMessage, ServerMessage, Difficulty, PlayerClass } from './types'
+import { ClientMessage, ServerMessage, Difficulty, PlayerClass, WeaponType } from './types'
 
 const PORT = Number(process.env.PORT) || 3001
 
@@ -249,6 +249,30 @@ async function handleMessage(playerId: string, message: ClientMessage): Promise<
         sendToPlayer(playerId, {
           type: 'build_result',
           payload: { success },
+        })
+      }
+      break
+    }
+
+    case 'upgrade_weapon': {
+      const { weaponType } = message.payload as { weaponType: WeaponType }
+      if (player.roomId) {
+        const success = gameEngine.upgradeWeapon(player.roomId, playerId, weaponType)
+        sendToPlayer(playerId, {
+          type: 'upgrade_weapon_result',
+          payload: { success, weaponType },
+        })
+      }
+      break
+    }
+
+    case 'select_skill': {
+      const { skillId } = message.payload as { skillId: string }
+      if (player.roomId) {
+        const success = gameEngine.selectSkill(player.roomId, playerId, skillId)
+        sendToPlayer(playerId, {
+          type: 'select_skill_result',
+          payload: { success, skillId },
         })
       }
       break

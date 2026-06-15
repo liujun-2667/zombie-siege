@@ -1,5 +1,5 @@
-import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay } from '../types'
-import { GAME_CONFIG, PLAYER_CLASSES, ZOMBIE_CONFIG, STRUCTURE_CONFIG } from '../config/gameConfig'
+import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode } from '../types'
+import { GAME_CONFIG, PLAYER_CLASSES, ZOMBIE_CONFIG, STRUCTURE_CONFIG, WEAPON_CONFIG, SKILL_TREE_CONFIG } from '../config/gameConfig'
 import { generateId, getDistance, getRandomSpawnPosition, clamp } from '../utils/helpers'
 import { roomManager } from '../managers/roomManager'
 
@@ -33,6 +33,7 @@ export class GameEngine {
       day: 1,
       timeOfDay: 'day',
       timeRemaining: GAME_CONFIG.DAY_DURATION,
+      currentNight: 0,
       players: [],
       zombies: [],
       structures,
@@ -65,6 +66,26 @@ export class GameEngine {
     return points
   }
 
+  private initializeSkillTree(classType: PlayerClass): SkillTreeNode[] {
+    const config = SKILL_TREE_CONFIG[classType]
+    const nodes: SkillTreeNode[] = []
+    
+    config.tiers.forEach((tier, tierIndex) => {
+      tier.forEach(skill => {
+        nodes.push({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          level: tierIndex + 1,
+          isUnlocked: tierIndex === 0,
+          isSelected: false,
+        })
+      })
+    })
+    
+    return nodes
+  }
+
   addPlayer(roomId: string, playerId: string, playerName: string, classType: PlayerClass): PlayerState {
     const gameState = this.gameStates.get(roomId)
     if (!gameState) throw new Error('Game state not found')
@@ -73,6 +94,7 @@ export class GameEngine {
     const centerX = GAME_CONFIG.MAP_WIDTH / 2
     const centerY = GAME_CONFIG.MAP_HEIGHT / 2
 
+    const pistolConfig = WEAPON_CONFIG.pistol
     const player: PlayerState = {
       id: playerId,
       name: playerName,
@@ -85,9 +107,20 @@ export class GameEngine {
       skills: [
         { name: classConfig.skill.active.name, cooldown: 0, maxCooldown: classConfig.skill.active.cooldown },
       ],
+      skillPoints: 0,
+      skillTree: this.initializeSkillTree(classType),
+      weapon: {
+        type: 'pistol',
+        level: 0,
+        damage: pistolConfig.baseDamage,
+        fireRate: pistolConfig.baseFireRate,
+        range: pistolConfig.baseRange,
+      },
       isDead: false,
       deathTime: 0,
       kills: 0,
+      zombieKills: 0,
+      specialZombieKills: 0,
       resourcesCollected: 0,
     }
 
@@ -137,35 +170,122 @@ export class GameEngine {
     gameState.resources.ammo -= 1
 
     const classConfig = PLAYER_CLASSES[player.classType]
-    const damage = Math.floor(20 * classConfig.damage * (Math.random() > 0.15 ? 1 : 1.5))
+    let damage = player.weapon.damage * classConfig.damage
 
-    let closestZombie: ZombieState | null = null
-    let closestDistance = Infinity
-
-    for (const zombie of gameState.zombies) {
-      const dist = getDistance(zombie.position, player.position)
-      if (dist < closestDistance && dist < 300) {
-        const angle = Math.atan2(targetY - player.position.y, targetX - player.position.x)
-        const zombieAngle = Math.atan2(zombie.position.y - player.position.y, zombie.position.x - player.position.x)
-        const angleDiff = Math.abs(angle - zombieAngle)
-
-        if (angleDiff < 0.5) {
-          closestZombie = zombie
-          closestDistance = dist
-        }
-      }
+    const critSkill = player.skillTree.find(s => s.id === 'assault_1b' && s.isSelected)
+    if (critSkill && Math.random() < 0.2) {
+      damage *= 2
     }
 
-    if (closestZombie) {
-      closestZombie.health -= damage
-      if (closestZombie.health <= 0) {
-        this.killZombie(roomId, closestZombie.id)
-        player.kills += 1
+    const pierceSkill = player.skillTree.find(s => s.id === 'assault_2a' && s.isSelected)
+    const pierceCount = pierceSkill ? 2 : 0
+    const hitZombies: ZombieState[] = []
+
+    const zombiesInRange = gameState.zombies.filter(z => {
+      const dist = getDistance(z.position, player.position)
+      return dist <= player.weapon.range
+    }).sort((a, b) => {
+      const distA = getDistance(a.position, player.position)
+      const distB = getDistance(b.position, player.position)
+      return distA - distB
+    })
+
+    const angle = Math.atan2(targetY - player.position.y, targetX - player.position.x)
+    
+    for (const zombie of zombiesInRange) {
+      const zombieAngle = Math.atan2(zombie.position.y - player.position.y, zombie.position.x - player.position.x)
+      const angleDiff = Math.abs(angle - zombieAngle)
+
+      if (angleDiff < 0.5 || hitZombies.length > 0 && pierceCount > 0) {
+        hitZombies.push(zombie)
+        zombie.health -= damage
+        
+        const burnSkill = player.skillTree.find(s => s.id === 'assault_2b' && s.isSelected)
+        if (burnSkill) {
+          zombie.health -= 5
+        }
+
+        if (zombie.health <= 0) {
+          this.killZombie(roomId, zombie.id, playerId)
+          player.kills += 1
+        }
+
+        if (hitZombies.length > pierceCount) break
       }
     }
   }
 
-  private killZombie(roomId: string, zombieId: string): void {
+  upgradeWeapon(roomId: string, playerId: string, targetType: WeaponType): boolean {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return false
+
+    const player = gameState.players.find(p => p.id === playerId)
+    if (!player || player.isDead) return false
+
+    if (targetType === 'pistol') return false
+
+    const barracks = gameState.structures.find(s => s.type === 'barracks')
+    if (!barracks) return false
+
+    const weaponConfig = WEAPON_CONFIG[targetType]
+    if (!weaponConfig || !weaponConfig.upgradeCosts) return false
+
+    let targetLevel = 0
+    let cost = 0
+
+    if (player.weapon.type === targetType) {
+      if (player.weapon.level >= 3) return false
+      targetLevel = player.weapon.level + 1
+      cost = weaponConfig.upgradeCosts[player.weapon.level]
+    } else {
+      targetLevel = 1
+      cost = weaponConfig.upgradeCosts[0]
+    }
+
+    if (gameState.resources.iron < cost) return false
+
+    gameState.resources.iron -= cost
+
+    const bonus = weaponConfig.levelBonuses[targetLevel - 1]
+    player.weapon = {
+      type: targetType,
+      level: targetLevel,
+      damage: bonus.damage,
+      fireRate: bonus.fireRate,
+      range: bonus.range,
+    }
+
+    return true
+  }
+
+  selectSkill(roomId: string, playerId: string, skillId: string): boolean {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return false
+
+    const player = gameState.players.find(p => p.id === playerId)
+    if (!player || player.isDead) return false
+
+    if (player.skillPoints <= 0) return false
+
+    const skill = player.skillTree.find(s => s.id === skillId)
+    if (!skill || !skill.isUnlocked || skill.isSelected) return false
+
+    const tierSkills = player.skillTree.filter(s => s.level === skill.level)
+    tierSkills.forEach(s => {
+      s.isSelected = s.id === skillId
+    })
+
+    player.skillPoints -= 1
+
+    const nextTier = player.skillTree.filter(s => s.level === skill.level + 1)
+    nextTier.forEach(s => {
+      s.isUnlocked = true
+    })
+
+    return true
+  }
+
+  private killZombie(roomId: string, zombieId: string, killerId?: string): void {
     const gameState = this.gameStates.get(roomId)
     if (!gameState) return
 
@@ -177,6 +297,27 @@ export class GameEngine {
     gameState.resources.wood += reward.wood
     gameState.resources.iron += reward.iron
     gameState.resources.medkit += reward.medkit
+
+    if (killerId) {
+      const killer = gameState.players.find(p => p.id === killerId)
+      if (killer) {
+        const isSpecial = zombie.type !== 'normal'
+        if (isSpecial) {
+          killer.specialZombieKills += 1
+          killer.skillPoints += 1
+        } else {
+          killer.zombieKills += 1
+          if (killer.zombieKills % 10 === 0) {
+            killer.skillPoints += 1
+          }
+        }
+        
+        const ammoRefundSkill = killer.skillTree.find(s => s.id === 'assault_1a' && s.isSelected)
+        if (ammoRefundSkill) {
+          gameState.resources.ammo += Math.floor(reward.ammo * 0.3)
+        }
+      }
+    }
 
     gameState.zombies = gameState.zombies.filter(z => z.id !== zombieId)
   }

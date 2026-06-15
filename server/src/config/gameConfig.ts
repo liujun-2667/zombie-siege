@@ -227,10 +227,128 @@ export const STRUCTURE_CONFIG = {
     fireRate: 1000,
     ammoConsumption: 1,
     levelBonus: {
-      1: { range: 180 },
+      1: { range: 180, damage: 15 },
       2: { range: 220, damage: 20 },
       3: { range: 260, damage: 30, fireRate: 600 },
     },
+  },
+}
+
+export const WEAPON_CONFIG = {
+  pistol: {
+    name: '手枪',
+    icon: '🔫',
+    baseDamage: 10,
+    baseFireRate: 2,
+    baseRange: 200,
+  },
+  submachine: {
+    name: '冲锋枪',
+    icon: '💥',
+    baseDamage: 8,
+    baseFireRate: 6,
+    baseRange: 150,
+    upgradeCosts: [10, 25, 50],
+    levelBonuses: [
+      { damage: 8, fireRate: 6, range: 150 },
+      { damage: 10, fireRate: 8, range: 160 },
+      { damage: 12, fireRate: 10, range: 175 },
+    ],
+  },
+  sniper: {
+    name: '狙击枪',
+    icon: '🎯',
+    baseDamage: 35,
+    baseFireRate: 0.5,
+    baseRange: 400,
+    upgradeCosts: [10, 25, 50],
+    levelBonuses: [
+      { damage: 35, fireRate: 0.5, range: 400 },
+      { damage: 50, fireRate: 0.6, range: 450 },
+      { damage: 75, fireRate: 0.7, range: 500 },
+    ],
+  },
+  shotgun: {
+    name: '霰弹枪',
+    icon: '🔶',
+    baseDamage: 20,
+    baseFireRate: 1,
+    baseRange: 100,
+    spreadAngle: 45,
+    pellets: 8,
+    upgradeCosts: [10, 25, 50],
+    levelBonuses: [
+      { damage: 20, fireRate: 1, range: 100, pellets: 8 },
+      { damage: 25, fireRate: 1.2, range: 110, pellets: 10 },
+      { damage: 30, fireRate: 1.5, range: 120, pellets: 12 },
+    ],
+  },
+}
+
+export const SKILL_TREE_CONFIG: Record<string, { tiers: Array<{ id: string; name: string; description: string; effect: Record<string, unknown> }[]> }> = {
+  assault: {
+    tiers: [
+      [
+        { id: 'assault_1a', name: '弹药回收', description: '击杀返还30%弹药', effect: { ammoRefund: 0.3 } },
+        { id: 'assault_1b', name: '暴击概率', description: '20%概率双倍伤害', effect: { critChance: 0.2, critMultiplier: 2 } },
+      ],
+      [
+        { id: 'assault_2a', name: '穿透射击', description: '子弹穿透2个目标', effect: { pierceCount: 2 } },
+        { id: 'assault_2b', name: '燃烧弹', description: '命中后持续3秒灼伤', effect: { burnDuration: 3, burnDamage: 5 } },
+      ],
+      [
+        { id: 'assault_3a', name: '狂暴模式增强', description: '持续时间翻倍', effect: { rageDurationMultiplier: 2 } },
+        { id: 'assault_3b', name: '死亡标记', description: '被标记的僵尸受到全队伤害加成50%', effect: { markDamageBonus: 0.5 } },
+      ],
+    ],
+  },
+  engineer: {
+    tiers: [
+      [
+        { id: 'engineer_1a', name: '快速部署', description: '建造时间减半', effect: { buildTimeMultiplier: 0.5 } },
+        { id: 'engineer_1b', name: '坚固工事', description: '工事血量+50%', effect: { structureHealthBonus: 0.5 } },
+      ],
+      [
+        { id: 'engineer_2a', name: '连锁地雷', description: '地雷爆炸触发相邻地雷', effect: { mineChainReaction: true } },
+        { id: 'engineer_2b', name: '智能炮塔', description: '炮塔优先攻击血量最低目标', effect: { turretSmartTargeting: true } },
+      ],
+      [
+        { id: 'engineer_3a', name: '过载模式', description: '炮塔射速翻倍持续10秒', effect: { turretOverloadDuration: 10, turretFireRateMultiplier: 2 } },
+        { id: 'engineer_3b', name: '防御矩阵', description: '周围工事10秒内免疫伤害', effect: { defenseMatrixDuration: 10, immunity: true } },
+      ],
+    ],
+  },
+  medic: {
+    tiers: [
+      [
+        { id: 'medic_1a', name: '治疗增幅', description: '治疗效果+30%', effect: { healBonus: 0.3 } },
+        { id: 'medic_1b', name: '复活加速', description: '复活时间-30%', effect: { respawnTimeReduction: 0.3 } },
+      ],
+      [
+        { id: 'medic_2a', name: '群体治疗', description: '治疗范围扩大50%', effect: { healRangeBonus: 0.5 } },
+        { id: 'medic_2b', name: '急救专精', description: '医疗包效果翻倍', effect: { medkitMultiplier: 2 } },
+      ],
+      [
+        { id: 'medic_3a', name: '重生光环', description: '死亡时立即复活周围队友', effect: { reviveAura: true } },
+        { id: 'medic_3b', name: '生命链接', description: '队友伤害的10%转化为自身治疗', effect: { lifestealShare: 0.1 } },
+      ],
+    ],
+  },
+  commander: {
+    tiers: [
+      [
+        { id: 'commander_1a', name: '光环范围', description: '指挥官光环范围+50%', effect: { auraRangeBonus: 0.5 } },
+        { id: 'commander_1b', name: '减速增强', description: '减速效果+20%', effect: { slowEffectBonus: 0.2 } },
+      ],
+      [
+        { id: 'commander_2a', name: '攻击指挥', description: '队友伤害+15%', effect: { damageBuff: 0.15 } },
+        { id: 'commander_2b', name: '防御指挥', description: '队友护甲+20%', effect: { armorBuff: 0.2 } },
+      ],
+      [
+        { id: 'commander_3a', name: '战术撤退', description: '全体队友获得5秒无敌', effect: { invincibilityDuration: 5 } },
+        { id: 'commander_3b', name: '终极号令', description: '所有炮塔和队友伤害翻倍持续8秒', effect: { ultimateDamageMultiplier: 2, duration: 8 } },
+      ],
+    ],
   },
 }
 

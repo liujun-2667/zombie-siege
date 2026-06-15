@@ -7,6 +7,8 @@
       @shoot="handleShoot"
       @scavenge="handleScavenge"
       @build="handleBuild"
+      @upgrade-weapon="handleUpgradeWeapon"
+      @select-skill="handleSelectSkill"
     />
     
     <div v-else-if="gameStore.currentRoom" class="min-h-screen">
@@ -88,7 +90,7 @@ import RoomWaiting from './components/RoomWaiting.vue'
 import GameCanvas from './components/GameCanvas.vue'
 import GameOverModal from './components/GameOverModal.vue'
 
-const { createRoom, joinRoom, quickMatch, leaveRoom, startGame, selectClass, move, shoot, scavenge, build } = useWebSocket()
+const { createRoom, joinRoom, quickMatch, leaveRoom, startGame, selectClass, move, shoot, scavenge, build, upgradeWeapon, selectSkill } = useWebSocket()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
@@ -145,6 +147,14 @@ const handleBuild = () => {
   if (gameStore.gameState) {
     build('wall', 400, 300)
   }
+}
+
+const handleUpgradeWeapon = (weaponType: string) => {
+  upgradeWeapon(weaponType as any)
+}
+
+const handleSelectSkill = (skillId: string) => {
+  selectSkill(skillId)
 }
 
 const handleRestart = () => {

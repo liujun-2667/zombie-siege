@@ -1,6 +1,6 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { gameStore, setRooms, setConnected, setCurrentRoom, setGameState, setShowGameOver } from '../stores/gameStore'
-import type { Room, GameState, PlayerClass } from '../types'
+import type { Room, GameState, PlayerClass, WeaponType } from '../types'
 
 const getWsUrl = () => {
   if (import.meta.env.MODE === 'production') {
@@ -199,6 +199,20 @@ export function useWebSocket() {
     })
   }
 
+  const upgradeWeapon = (weaponType: WeaponType) => {
+    sendMessage({
+      type: 'upgrade_weapon',
+      payload: { weaponType },
+    })
+  }
+
+  const selectSkill = (skillId: string) => {
+    sendMessage({
+      type: 'select_skill',
+      payload: { skillId },
+    })
+  }
+
   onMounted(() => {
     connect()
   })
@@ -222,5 +236,7 @@ export function useWebSocket() {
     shoot,
     scavenge,
     build,
+    upgradeWeapon,
+    selectSkill,
   }
 }

@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --color-primary: #2d5a3d;
   --color-primary-dark: #1a3d27;
@@ -25,20 +29,14 @@ body {
   min-height: 100vh;
 }
 
-#__nuxt {
-  min-height: 100vh;
+.text-shadow {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
-@layer utilities {
-  .text-shadow {
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-  }
-  
-  .glow-primary {
-    box-shadow: 0 0 15px rgba(45, 90, 61, 0.5);
-  }
-  
-  .glow-accent {
-    box-shadow: 0 0 15px rgba(255, 107, 53, 0.5);
-  }
+.glow-primary {
+  box-shadow: 0 0 15px rgba(45, 90, 61, 0.5);
+}
+
+.glow-accent {
+  box-shadow: 0 0 15px rgba(255, 107, 53, 0.5);
 }

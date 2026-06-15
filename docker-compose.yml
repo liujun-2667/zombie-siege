@@ -24,15 +24,13 @@ services:
       - redis
     restart: unless-stopped
 
-  nginx:
-    image: nginx:alpine
-    container_name: zombie-siege-nginx
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: zombie-siege-client
     ports:
       - "80:80"
-      - "443:443"
-    volumes:
-      - ./client/dist:/usr/share/nginx/html
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       - server
     restart: unless-stopped

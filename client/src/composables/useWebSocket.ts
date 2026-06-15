@@ -2,7 +2,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { gameStore, setRooms, setConnected, setCurrentRoom, setShowClassSelection, setGameState, setShowGameOver } from '../stores/gameStore'
 import type { Room, GameState, PlayerClass } from '../types'
 
-const config = useRuntimeConfig()
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001'
 
 export function useWebSocket() {
   const ws = ref<WebSocket | null>(null)
@@ -13,7 +13,7 @@ export function useWebSocket() {
 
     isConnecting.value = true
     
-    ws.value = new WebSocket(config.public.wsUrl)
+    ws.value = new WebSocket(WS_URL)
 
     ws.value.onopen = () => {
       console.log('WebSocket connected')

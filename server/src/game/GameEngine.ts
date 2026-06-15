@@ -1,4 +1,4 @@
-import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode, GameStats, PlayerStats, ThreatGrid, FormationPreset, FormationPosition, DeploymentOrder } from '../types'
+import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode, GameStats, PlayerStats, ThreatGrid, ThreatGridSnapshot, FormationPreset, FormationPosition, DeploymentOrder } from '../types'
 import { GAME_CONFIG, PLAYER_CLASSES, ZOMBIE_CONFIG, STRUCTURE_CONFIG, WEAPON_CONFIG, SKILL_TREE_CONFIG } from '../config/gameConfig'
 import { generateId, getDistance, getRandomSpawnPosition, clamp } from '../utils/helpers'
 import { roomManager } from '../managers/roomManager'
@@ -11,6 +11,10 @@ export class GameEngine {
   private formationPresets: Map<string, FormationPreset[]> = new Map()
   private threatGridUpdates: Map<string, number> = new Map()
   private lastResourceSnapshot: Map<string, { ammo: number; medkit: number; time: number }> = new Map()
+  private heatmapSnapshotInterval: Map<string, number> = new Map()
+  private lastHeatmapSnapshot: Map<string, number> = new Map()
+  private static readonly HEATMAP_SNAPSHOT_INTERVAL = 2000 // 2 seconds
+  private static readonly HEATMAP_MAX_SNAPSHOTS = 30 // 30 frames = 60 seconds
 
   createGameState(roomId: string): GameState {
     const centerX = GAME_CONFIG.MAP_WIDTH / 2
@@ -48,6 +52,7 @@ export class GameEngine {
     this.formationPresets.set(roomId, [])
 
     this.lastResourceSnapshot.set(roomId, { ammo: 50, medkit: 10, time: Date.now() })
+    this.lastHeatmapSnapshot.set(roomId, 0)
 
     return {
       roomId,
@@ -64,6 +69,7 @@ export class GameEngine {
       gameOver: false,
       victory: false,
       threatGrid,
+      heatmapSnapshots: [],
       currentFormation: null,
       deploymentOrders: [],
     }
@@ -951,6 +957,24 @@ export class GameEngine {
     }
 
     gameState.threatGrid = { grid, lastUpdate: now }
+
+    // Save heatmap snapshot every 2 seconds
+    const lastSnapshot = this.lastHeatmapSnapshot.get(roomId) || 0
+    if (now - lastSnapshot >= GameEngine.HEATMAP_SNAPSHOT_INTERVAL) {
+      this.lastHeatmapSnapshot.set(roomId, now)
+
+      // Create snapshot (deep copy the grid)
+      const snapshot: ThreatGridSnapshot = {
+        grid: grid.map(row => [...row]),
+        timestamp: now,
+      }
+
+      // Ring buffer: add new snapshot, remove oldest if at capacity
+      if (gameState.heatmapSnapshots.length >= GameEngine.HEATMAP_MAX_SNAPSHOTS) {
+        gameState.heatmapSnapshots.shift()
+      }
+      gameState.heatmapSnapshots.push(snapshot)
+    }
   }
 
   private updateResourceConsumption(roomId: string): void {
@@ -1071,6 +1095,8 @@ export class GameEngine {
     this.formationPresets.delete(roomId)
     this.threatGridUpdates.delete(roomId)
     this.lastResourceSnapshot.delete(roomId)
+    this.heatmapSnapshotInterval.delete(roomId)
+    this.lastHeatmapSnapshot.delete(roomId)
   }
 }
 

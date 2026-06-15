@@ -127,6 +127,11 @@ export interface ThreatGrid {
   lastUpdate: number
 }
 
+export interface ThreatGridSnapshot {
+  grid: number[][]
+  timestamp: number
+}
+
 export interface FormationPosition {
   playerId: string
   x: number
@@ -209,6 +214,7 @@ export interface GameState {
   gameOver: boolean
   victory: boolean
   threatGrid: ThreatGrid
+  heatmapSnapshots: ThreatGridSnapshot[]
   currentFormation: FormationPosition[] | null
   deploymentOrders: DeploymentOrder[]
 }

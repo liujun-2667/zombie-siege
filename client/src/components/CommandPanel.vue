@@ -43,6 +43,36 @@
                 <span>高威胁</span>
               </div>
               <div class="h-3 bg-gradient-to-r from-green-500 via-yellow-500 to-red-500 rounded-full"></div>
+
+              <!-- Timeline Slider -->
+              <div class="mt-4 bg-gray-800 rounded-lg p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-gray-400 text-sm">-60s</span>
+                  <span v-if="!isHeatmapLive" class="text-yellow-400 text-xs">回放模式</span>
+                  <button
+                    v-if="!isHeatmapLive"
+                    class="px-3 py-1 bg-primary hover:bg-primary-dark text-white text-xs rounded transition-all"
+                    @click="resumeLiveHeatmap"
+                  >
+                    恢复实时
+                  </button>
+                  <span class="text-gray-400 text-sm">当前</span>
+                </div>
+                <input
+                  v-model="heatmapSliderValue"
+                  type="range"
+                  min="0"
+                  :max="heatmapSnapshots.length"
+                  class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                  @input="onHeatmapSliderChange"
+                  @change="onHeatmapSliderChange"
+                />
+                <div class="flex justify-between text-xs text-gray-500 mt-1">
+                  <span v-for="(snap, idx) in heatmapSnapshots" :key="idx">
+                    {{ idx === heatmapSnapshots.length - 1 ? '当前' : `-${(heatmapSnapshots.length - idx) * 2}s` }}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div class="w-80">
@@ -111,12 +141,31 @@
             <div class="flex-1">
               <div class="flex items-center justify-between mb-3">
                 <h3 class="text-lg font-semibold text-white">阵型编辑器</h3>
-                <button
-                  class="px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg transition-all"
-                  @click="handleDeployFormation"
-                >
-                  部署阵型
-                </button>
+                <div class="flex gap-2">
+                  <button
+                    v-if="!isPreviewMode"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all"
+                    @click="togglePreviewMode"
+                  >
+                    预览路径
+                  </button>
+                  <button
+                    v-else
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-all"
+                    @click="togglePreviewMode"
+                  >
+                    取消预览
+                  </button>
+                  <button
+                    class="px-4 py-2 text-white rounded-lg transition-all"
+                    :class="hasPathCollision ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'bg-primary hover:bg-primary-dark'"
+                    :disabled="hasPathCollision"
+                    :title="hasPathCollision ? '存在路径冲突,请调整站位' : ''"
+                    @click="handleDeployFormation"
+                  >
+                    部署阵型
+                  </button>
+                </div>
               </div>
 
               <canvas
@@ -315,7 +364,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
-import type { GameState, PlayerState, PlayerClass, FormationPreset, FormationPosition, GameStats, PlayerStats } from '../types'
+import type { GameState, PlayerState, PlayerClass, FormationPreset, FormationPosition, GameStats, PlayerStats, ThreatGridSnapshot } from '../types'
 
 const props = defineProps<{
   visible: boolean
@@ -358,6 +407,16 @@ const damageChartCanvas = ref<HTMLCanvasElement | null>(null)
 const presetName = ref('')
 const formationPositions = ref<Map<string, { x: number; y: number }>>(new Map())
 const draggingPlayer = ref<string | null>(null)
+
+// Heatmap history playback
+const isHeatmapLive = ref(true)
+const heatmapSliderValue = ref(0)
+const selectedHeatmapGrid = ref<number[][] | null>(null)
+
+// Path preview and collision detection
+const isPreviewMode = ref(false)
+const pathCollisions = ref<Array<{ x: number; y: number }>>([])
+const hasPathCollision = computed(() => pathCollisions.value.length > 0)
 const playerColors: Record<string, string> = {
   assault: '#ef4444',
   engineer: '#eab308',
@@ -368,6 +427,7 @@ const playerColors: Record<string, string> = {
 const players = computed(() => props.gameState?.players || [])
 const resources = computed(() => props.gameState?.resources || { ammo: 0, wood: 0, iron: 0, medkit: 0 })
 const resourceConsumption = computed(() => props.gameStats?.resourceConsumption || { ammoPerMinute: 0, medkitPerMinute: 0 })
+const heatmapSnapshots = computed(() => props.gameState?.heatmapSnapshots || [])
 
 // DPS计算:服务端已清理5秒外数据,直接累加5秒内伤害除以5
 const dpsData = computed(() => {
@@ -425,7 +485,9 @@ const drawHeatmap = () => {
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
-  const grid = props.gameState?.threatGrid.grid || Array(10).fill(null).map(() => Array(10).fill(0))
+
+  // Use selected historical grid if in playback mode, otherwise use live grid
+  const grid = selectedHeatmapGrid.value || props.gameState?.threatGrid.grid || Array(10).fill(null).map(() => Array(10).fill(0))
   const cellSize = 40
   ctx.fillStyle = '#1f2937'
   ctx.fillRect(0, 0, 400, 400)
@@ -447,6 +509,105 @@ const drawHeatmap = () => {
       }
     }
   }
+}
+
+const onHeatmapSliderChange = () => {
+  const snapshots = heatmapSnapshots.value
+  const index = parseInt(heatmapSliderValue.value as unknown as string)
+  if (index >= 0 && index < snapshots.length) {
+    selectedHeatmapGrid.value = snapshots[index].grid
+    isHeatmapLive.value = false
+    drawHeatmap()
+  } else if (index >= snapshots.length) {
+    // This means "current" is selected
+    resumeLiveHeatmap()
+  }
+}
+
+const resumeLiveHeatmap = () => {
+  isHeatmapLive.value = true
+  selectedHeatmapGrid.value = null
+  heatmapSliderValue.value = heatmapSnapshots.value.length
+  drawHeatmap()
+}
+
+// Line segment intersection detection
+const lineIntersects = (p1: { x: number; y: number }, p2: { x: number; y: number }, p3: { x: number; y: number }, p4: { x: number; y: number }): { x: number; y: number } | null => {
+  const d1x = p2.x - p1.x
+  const d1y = p2.y - p1.y
+  const d2x = p4.x - p3.x
+  const d2y = p4.y - p3.y
+
+  const cross = d1x * d2y - d1y * d2x
+  if (Math.abs(cross) < 0.0001) return null
+
+  const t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / cross
+  const u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / cross
+
+  if (t >= 0.01 && t <= 0.99 && u >= 0.01 && u <= 0.99) {
+    return {
+      x: p1.x + t * d1x,
+      y: p1.y + t * d1y,
+    }
+  }
+  return null
+}
+
+const calculatePathCollisions = () => {
+  const paths: Array<{ start: { x: number; y: number }; end: { x: number; y: number }; playerId: string }> = []
+
+  for (const player of players.value) {
+    const pos = formationPositions.value.get(player.id)
+    if (!pos) continue
+
+    // Current position (scaled down by 2 as in canvas)
+    const currentX = player.position.x / 2
+    const currentY = player.position.y / 2
+    // Target position from formation
+    const targetX = pos.x
+    const targetY = pos.y
+
+    paths.push({
+      start: { x: currentX, y: currentY },
+      end: { x: targetX, y: targetY },
+      playerId: player.id,
+    })
+  }
+
+  const collisions: Array<{ x: number; y: number }> = []
+
+  // Check each pair of paths for intersection
+  for (let i = 0; i < paths.length; i++) {
+    for (let j = i + 1; j < paths.length; j++) {
+      const intersection = lineIntersects(
+        paths[i].start,
+        paths[i].end,
+        paths[j].start,
+        paths[j].end
+      )
+      if (intersection) {
+        // Check if this collision point already exists (within tolerance)
+        const exists = collisions.some(c =>
+          Math.abs(c.x - intersection.x) < 5 && Math.abs(c.y - intersection.y) < 5
+        )
+        if (!exists) {
+          collisions.push(intersection)
+        }
+      }
+    }
+  }
+
+  return collisions
+}
+
+const togglePreviewMode = () => {
+  isPreviewMode.value = !isPreviewMode.value
+  if (isPreviewMode.value) {
+    pathCollisions.value = calculatePathCollisions()
+  } else {
+    pathCollisions.value = []
+  }
+  drawFormationEditor()
 }
 
 const drawFormationEditor = () => {
@@ -476,15 +637,84 @@ const drawFormationEditor = () => {
   ctx.strokeStyle = '#2d5a3d'
   ctx.lineWidth = 2
   ctx.strokeRect(centerX - baseSize / 2, centerY - baseSize / 2, baseSize, baseSize)
+
+  // Draw paths in preview mode
+  if (isPreviewMode.value) {
+    for (const player of players.value) {
+      const pos = formationPositions.value.get(player.id)
+      if (!pos) continue
+
+      const currentX = player.position.x / 2
+      const currentY = player.position.y / 2
+      const targetX = pos.x
+      const targetY = pos.y
+
+      // Draw dashed line from current to target position
+      ctx.strokeStyle = getClassColor(player.classType)
+      ctx.lineWidth = 2
+      ctx.setLineDash([5, 5])
+      ctx.beginPath()
+      ctx.moveTo(currentX, currentY)
+      ctx.lineTo(targetX, targetY)
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      // Draw arrow head at target
+      const angle = Math.atan2(targetY - currentY, targetX - currentX)
+      const arrowSize = 8
+      ctx.fillStyle = getClassColor(player.classType)
+      ctx.beginPath()
+      ctx.moveTo(targetX, targetY)
+      ctx.lineTo(
+        targetX - arrowSize * Math.cos(angle - Math.PI / 6),
+        targetY - arrowSize * Math.sin(angle - Math.PI / 6)
+      )
+      ctx.lineTo(
+        targetX - arrowSize * Math.cos(angle + Math.PI / 6),
+        targetY - arrowSize * Math.sin(angle + Math.PI / 6)
+      )
+      ctx.closePath()
+      ctx.fill()
+    }
+
+    // Draw collision points
+    for (const collision of pathCollisions.value) {
+      ctx.strokeStyle = '#ef4444'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.arc(collision.x, collision.y, 10, 0, Math.PI * 2)
+      ctx.stroke()
+
+      ctx.fillStyle = '#ef4444'
+      ctx.font = 'bold 10px Arial'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText('冲突', collision.x, collision.y - 12)
+    }
+  }
+
   for (const player of players.value) {
     const pos = formationPositions.value.get(player.id)
     const x = pos?.x ?? player.position.x / 2
     const y = pos?.y ?? player.position.y / 2
+
+    // In preview mode, draw a smaller dot for current position
+    if (isPreviewMode.value) {
+      const currentX = player.position.x / 2
+      const currentY = player.position.y / 2
+      ctx.fillStyle = getClassColor(player.classType)
+      ctx.globalAlpha = 0.5
+      ctx.beginPath()
+      ctx.arc(currentX, currentY, 8, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.globalAlpha = 1.0
+    }
+
     ctx.fillStyle = getClassColor(player.classType)
     ctx.beginPath()
     ctx.arc(x, y, 12, 0, Math.PI * 2)
     ctx.fill()
-    ctx.strokeStyle = '#fff'
+    ctx.strokeStyle = isPreviewMode.value ? '#ffd700' : '#fff'
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.arc(x, y, 12, 0, Math.PI * 2)
@@ -649,6 +879,9 @@ const drawDamageChart = () => {
 }
 
 const handleCanvasMouseDown = (e: MouseEvent) => {
+  // Lock editing during preview mode
+  if (isPreviewMode.value) return
+
   const canvas = formationCanvas.value
   if (!canvas) return
   const rect = canvas.getBoundingClientRect()
@@ -674,6 +907,12 @@ const handleCanvasMouseMove = (e: MouseEvent) => {
   const x = Math.max(0, Math.min(400, e.clientX - rect.left))
   const y = Math.max(0, Math.min(400, e.clientY - rect.top))
   formationPositions.value.set(draggingPlayer.value, { x, y })
+
+  // Recalculate collisions if in preview mode
+  if (isPreviewMode.value) {
+    pathCollisions.value = calculatePathCollisions()
+  }
+
   drawFormationEditor()
 }
 
@@ -682,6 +921,11 @@ const handleCanvasMouseUp = () => {
 }
 
 const handleDeployFormation = () => {
+  // Check for path collisions before deploying
+  if (isPreviewMode.value && hasPathCollision.value) {
+    return
+  }
+
   const positions: FormationPosition[] = []
   formationPositions.value.forEach((pos, playerId) => {
     positions.push({
@@ -729,7 +973,13 @@ const handleClearFormation = () => {
 let redrawTimer: number | null = null
 
 watch(() => props.gameState, () => {
-  drawHeatmap()
+  if (isHeatmapLive.value) {
+    drawHeatmap()
+    // Update slider max value when new snapshots arrive
+    if (heatmapSnapshots.value.length > 0) {
+      heatmapSliderValue.value = heatmapSnapshots.value.length
+    }
+  }
 }, { deep: true })
 
 watch(() => props.gameStats, () => {
@@ -763,6 +1013,7 @@ onMounted(() => {
       y: player.position.y / 2,
     })
   }
+  heatmapSliderValue.value = heatmapSnapshots.value.length
   drawHeatmap()
   drawFormationEditor()
   drawDamageChart()

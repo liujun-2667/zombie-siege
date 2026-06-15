@@ -44,13 +44,13 @@
               </div>
               <div class="h-3 bg-gradient-to-r from-green-500 via-yellow-500 to-red-500 rounded-full"></div>
             </div>
-            
+
             <div class="w-80">
               <h3 class="text-lg font-semibold text-white mb-3">战场数据</h3>
-              
+
               <div class="space-y-4">
                 <div class="bg-gray-800 rounded-lg p-3">
-                  <div class="text-gray-400 text-sm mb-2">DPS 统计</div>
+                  <div class="text-gray-400 text-sm mb-2">DPS 统计 (最近5秒)</div>
                   <div class="space-y-1">
                     <div v-for="player in dpsData" :key="player.playerId" class="flex justify-between text-sm">
                       <span :style="{ color: getClassColor(player.classType) }">{{ player.playerName }}</span>
@@ -118,7 +118,7 @@
                   部署阵型
                 </button>
               </div>
-              
+
               <canvas
                 ref="formationCanvas"
                 class="w-full border-2 border-dashed border-gray-600 rounded-lg cursor-crosshair"
@@ -129,7 +129,7 @@
                 @mouseup="handleCanvasMouseUp"
                 @mouseleave="handleCanvasMouseUp"
               ></canvas>
-              
+
               <div class="mt-2 flex gap-2 flex-wrap">
                 <div
                   v-for="player in players"
@@ -147,7 +147,7 @@
 
             <div class="w-64">
               <h3 class="text-lg font-semibold text-white mb-3">阵型预设</h3>
-              
+
               <div class="space-y-2">
                 <div
                   v-for="preset in presets"
@@ -207,7 +207,7 @@
         <div v-show="activeTab === 'stats'" class="h-full overflow-auto">
           <div v-if="gameStats" class="space-y-6">
             <h3 class="text-xl font-semibold text-white">战斗统计</h3>
-            
+
             <div class="grid grid-cols-4 gap-4">
               <div class="bg-gray-800 rounded-lg p-4 text-center">
                 <div class="text-3xl font-bold text-yellow-400">{{ gameStats.totalZombiesKilled }}</div>
@@ -244,7 +244,7 @@
                     </div>
                     <span class="text-white font-semibold">{{ player.playerName }}</span>
                   </div>
-                  
+
                   <div class="grid grid-cols-4 gap-4 text-sm">
                     <div>
                       <div class="text-gray-400">总伤害</div>
@@ -286,7 +286,7 @@
             </div>
 
             <div>
-              <h4 class="text-lg font-semibold text-white mb-3">伤害输出趋势</h4>
+              <h4 class="text-lg font-semibold text-white mb-3">伤害输出趋势 (按玩家)</h4>
               <canvas
                 ref="damageChartCanvas"
                 class="w-full border border-gray-600 rounded-lg"
@@ -313,343 +313,465 @@
   </div>
 </template>
 
-<script setup lang="ts">import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
-import type { GameState, PlayerState, PlayerClass, FormationPreset, FormationPosition, GameStats } from '../types';
+<script setup lang="ts">
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import type { GameState, PlayerState, PlayerClass, FormationPreset, FormationPosition, GameStats, PlayerStats } from '../types'
+
 const props = defineProps<{
- visible: boolean;
- gameState: GameState | null;
- presets: FormationPreset[];
- gameStats: GameStats | null;
-}>();
+  visible: boolean
+  gameState: GameState | null
+  presets: FormationPreset[]
+  gameStats: GameStats | null
+}>()
+
 const emit = defineEmits<{
- (e: 'close'): void;
- (e: 'deployFormation', positions: FormationPosition[]): void;
- (e: 'savePreset', name: string, positions: FormationPosition[]): void;
- (e: 'loadPreset', presetId: string): void;
- (e: 'deletePreset', presetId: string): void;
-}>();
-const activeTab = ref<'situation' | 'formation' | 'stats'>('situation');
+  (e: 'close'): void
+  (e: 'deployFormation', positions: FormationPosition[]): void
+  (e: 'savePreset', name: string, positions: FormationPosition[]): void
+  (e: 'loadPreset', presetId: string): void
+  (e: 'deletePreset', presetId: string): void
+}>()
+
+const activeTab = ref<'situation' | 'formation' | 'stats'>(gameStore.commandPanelTab)
+
+// 同步store中的tab到本地
+watch(() => gameStore.commandPanelTab, (newTab) => {
+  activeTab.value = newTab
+})
+
+// 本地tab变化时同步到store
+watch(activeTab, (newTab) => {
+  if (gameStore.commandPanelTab !== newTab) {
+    gameStore.commandPanelTab = newTab
+  }
+})
+
 const tabs = [
- { id: 'situation' as const, name: '战场态势' },
- { id: 'formation' as const, name: '编队阵型' },
- { id: 'stats' as const, name: '战斗统计' },
-];
-const heatmapCanvas = ref<HTMLCanvasElement | null>(null);
-const formationCanvas = ref<HTMLCanvasElement | null>(null);
-const damageChartCanvas = ref<HTMLCanvasElement | null>(null);
-const presetName = ref('');
-const formationPositions = ref<Map<string, {
- x: number;
- y: number;
-}>>(new Map());
-const draggingPlayer = ref<string | null>(null);
-const players = computed(() => props.gameState?.players || []);
-const resources = computed(() => props.gameState?.resources || { ammo: 0, wood: 0, iron: 0, medkit: 0 });
-const resourceConsumption = computed(() => props.gameStats?.resourceConsumption || { ammoPerMinute: 0, medkitPerMinute: 0 });
+  { id: 'situation' as const, name: '战场态势' },
+  { id: 'formation' as const, name: '编队阵型' },
+  { id: 'stats' as const, name: '战斗统计' },
+]
+
+const heatmapCanvas = ref<HTMLCanvasElement | null>(null)
+const formationCanvas = ref<HTMLCanvasElement | null>(null)
+const damageChartCanvas = ref<HTMLCanvasElement | null>(null)
+const presetName = ref('')
+const formationPositions = ref<Map<string, { x: number; y: number }>>(new Map())
+const draggingPlayer = ref<string | null>(null)
+const playerColors: Record<string, string> = {
+  assault: '#ef4444',
+  engineer: '#eab308',
+  medic: '#22c55e',
+  commander: '#3b82f6',
+}
+
+const players = computed(() => props.gameState?.players || [])
+const resources = computed(() => props.gameState?.resources || { ammo: 0, wood: 0, iron: 0, medkit: 0 })
+const resourceConsumption = computed(() => props.gameStats?.resourceConsumption || { ammoPerMinute: 0, medkitPerMinute: 0 })
+
+// DPS计算:服务端已清理5秒外数据,直接累加5秒内伤害除以5
 const dpsData = computed(() => {
- if (!props.gameStats)
- return [];
- return props.gameStats.playerStats.map(player => ({
- ...player,
- dps: player.dpsHistory.length > 0
- ? player.dpsHistory.reduce((a, b) => a + b, 0) / player.dpsHistory.length
- : 0,
- }));
-});
+  if (!props.gameStats) return []
+  return props.gameStats.playerStats.map(player => {
+    const totalDamageInWindow = player.dpsHistory.reduce((sum, event) => sum + event.damage, 0)
+    const dps = totalDamageInWindow / 5
+    return {
+      ...player,
+      dps,
+    }
+  })
+})
+
 const estimatedRounds = computed(() => {
- const ammoRate = resourceConsumption.value.ammoPerMinute;
- const medkitRate = resourceConsumption.value.medkitPerMinute;
- if (ammoRate <= 0 && medkitRate <= 0)
- return 999;
- const ammoRounds = ammoRate > 0 ? Math.floor(resources.value.ammo / ammoRate * (90 + 120) / 60) : 999;
- const medkitRounds = medkitRate > 0 ? Math.floor(resources.value.medkit / medkitRate * (90 + 120) / 60) : 999;
- return Math.min(ammoRounds, medkitRounds, 10);
-});
+  const ammoRate = resourceConsumption.value.ammoPerMinute
+  const medkitRate = resourceConsumption.value.medkitPerMinute
+  if (ammoRate <= 0 && medkitRate <= 0) return 999
+  const ammoRounds = ammoRate > 0 ? Math.floor(resources.value.ammo / ammoRate * (90 + 120) / 60) : 999
+  const medkitRounds = medkitRate > 0 ? Math.floor(resources.value.medkit / medkitRate * (90 + 120) / 60) : 999
+  return Math.min(ammoRounds, medkitRounds, 10)
+})
+
 const totalDamage = computed(() => {
- if (!props.gameStats)
- return 0;
- return props.gameStats.playerStats.reduce((sum, p) => sum + p.totalDamage, 0).toFixed(0);
-});
+  if (!props.gameStats) return 0
+  return props.gameStats.playerStats.reduce((sum, p) => sum + p.totalDamage, 0).toFixed(0)
+})
+
 const getClassColor = (classType: PlayerClass): string => {
- switch (classType) {
- case 'assault': return '#ef4444';
- case 'engineer': return '#eab308';
- case 'medic': return '#22c55e';
- case 'commander': return '#3b82f6';
- default: return '#6b7280';
- }
-};
+  return playerColors[classType] || '#6b7280'
+}
+
 const getClassIcon = (classType: PlayerClass): string => {
- switch (classType) {
- case 'assault': return '⚔️';
- case 'engineer': return '🔧';
- case 'medic': return '💉';
- case 'commander': return '🎖️';
- default: return '👤';
- }
-};
+  switch (classType) {
+    case 'assault': return '⚔️'
+    case 'engineer': return '🔧'
+    case 'medic': return '💉'
+    case 'commander': return '🎖️'
+    default: return '👤'
+  }
+}
+
 const getClassName = (classType: PlayerClass): string => {
- switch (classType) {
- case 'assault': return '突击手';
- case 'engineer': return '工程师';
- case 'medic': return '医疗兵';
- case 'commander': return '指挥官';
- default: return '未知';
- }
-};
+  switch (classType) {
+    case 'assault': return '突击手'
+    case 'engineer': return '工程师'
+    case 'medic': return '医疗兵'
+    case 'commander': return '指挥官'
+    default: return '未知'
+  }
+}
+
 const drawHeatmap = () => {
- const canvas = heatmapCanvas.value;
- if (!canvas)
- return;
- const ctx = canvas.getContext('2d');
- if (!ctx)
- return;
- const grid = props.gameState?.threatGrid.grid || Array(10).fill(null).map(() => Array(10).fill(0));
- const cellSize = 40;
- ctx.fillStyle = '#1f2937';
- ctx.fillRect(0, 0, 400, 400);
- for (let y = 0; y < 10; y++) {
- for (let x = 0; x < 10; x++) {
- const threat = grid[y][x];
- const ratio = threat / 100;
- let r = Math.floor(0 + ratio * 255);
- let g = Math.floor(255 - ratio * 255);
- let b = 50;
- ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
- ctx.fillRect(x * cellSize, y * cellSize, cellSize - 1, cellSize - 1);
- if (threat > 0) {
- ctx.fillStyle = '#fff';
- ctx.font = 'bold 12px Arial';
- ctx.textAlign = 'center';
- ctx.textBaseline = 'middle';
- ctx.fillText(threat.toString(), x * cellSize + cellSize / 2, y * cellSize + cellSize / 2);
- }
- }
- }
-};
+  const canvas = heatmapCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const grid = props.gameState?.threatGrid.grid || Array(10).fill(null).map(() => Array(10).fill(0))
+  const cellSize = 40
+  ctx.fillStyle = '#1f2937'
+  ctx.fillRect(0, 0, 400, 400)
+  for (let y = 0; y < 10; y++) {
+    for (let x = 0; x < 10; x++) {
+      const threat = grid[y][x]
+      const ratio = threat / 100
+      const r = Math.floor(0 + ratio * 255)
+      const g = Math.floor(255 - ratio * 255)
+      const b = 50
+      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`
+      ctx.fillRect(x * cellSize, y * cellSize, cellSize - 1, cellSize - 1)
+      if (threat > 0) {
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 12px Arial'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(threat.toString(), x * cellSize + cellSize / 2, y * cellSize + cellSize / 2)
+      }
+    }
+  }
+}
+
 const drawFormationEditor = () => {
- const canvas = formationCanvas.value;
- if (!canvas)
- return;
- const ctx = canvas.getContext('2d');
- if (!ctx)
- return;
- ctx.fillStyle = '#1f2937';
- ctx.fillRect(0, 0, 400, 400);
- ctx.strokeStyle = '#374151';
- ctx.lineWidth = 1;
- for (let x = 0; x <= 400; x += 40) {
- ctx.beginPath();
- ctx.moveTo(x, 0);
- ctx.lineTo(x, 400);
- ctx.stroke();
- }
- for (let y = 0; y <= 400; y += 40) {
- ctx.beginPath();
- ctx.moveTo(0, y);
- ctx.lineTo(400, y);
- ctx.stroke();
- }
- const centerX = 200;
- const centerY = 200;
- const baseSize = 100;
- ctx.strokeStyle = '#2d5a3d';
- ctx.lineWidth = 2;
- ctx.strokeRect(centerX - baseSize / 2, centerY - baseSize / 2, baseSize, baseSize);
- for (const player of players.value) {
- const pos = formationPositions.value.get(player.id);
- const x = pos?.x ?? player.position.x / 2;
- const y = pos?.y ?? player.position.y / 2;
- ctx.fillStyle = getClassColor(player.classType);
- ctx.beginPath();
- ctx.arc(x, y, 12, 0, Math.PI * 2);
- ctx.fill();
- ctx.strokeStyle = '#fff';
- ctx.lineWidth = 2;
- ctx.beginPath();
- ctx.arc(x, y, 12, 0, Math.PI * 2);
- ctx.stroke();
- ctx.fillStyle = '#fff';
- ctx.font = 'bold 10px Arial';
- ctx.textAlign = 'center';
- ctx.textBaseline = 'middle';
- ctx.fillText(player.name.charAt(0), x, y);
- }
-};
+  const canvas = formationCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.fillStyle = '#1f2937'
+  ctx.fillRect(0, 0, 400, 400)
+  ctx.strokeStyle = '#374151'
+  ctx.lineWidth = 1
+  for (let x = 0; x <= 400; x += 40) {
+    ctx.beginPath()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, 400)
+    ctx.stroke()
+  }
+  for (let y = 0; y <= 400; y += 40) {
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.lineTo(400, y)
+    ctx.stroke()
+  }
+  const centerX = 200
+  const centerY = 200
+  const baseSize = 100
+  ctx.strokeStyle = '#2d5a3d'
+  ctx.lineWidth = 2
+  ctx.strokeRect(centerX - baseSize / 2, centerY - baseSize / 2, baseSize, baseSize)
+  for (const player of players.value) {
+    const pos = formationPositions.value.get(player.id)
+    const x = pos?.x ?? player.position.x / 2
+    const y = pos?.y ?? player.position.y / 2
+    ctx.fillStyle = getClassColor(player.classType)
+    ctx.beginPath()
+    ctx.arc(x, y, 12, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(x, y, 12, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 10px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(player.name.charAt(0), x, y)
+  }
+}
+
+// 折线图：按玩家分颜色
 const drawDamageChart = () => {
- const canvas = damageChartCanvas.value;
- if (!canvas)
- return;
- const ctx = canvas.getContext('2d');
- if (!ctx)
- return;
- const data = props.gameStats?.damageTimeSeries || [];
- if (data.length === 0) {
- ctx.fillStyle = '#1f2937';
- ctx.fillRect(0, 0, 800, 300);
- ctx.fillStyle = '#9ca3af';
- ctx.font = '14px Arial';
- ctx.textAlign = 'center';
- ctx.fillText('暂无数据', 400, 150);
- return;
- }
- ctx.fillStyle = '#1f2937';
- ctx.fillRect(0, 0, 800, 300);
- const padding = { top: 30, right: 30, bottom: 60, left: 60 };
- const chartWidth = 800 - padding.left - padding.right;
- const chartHeight = 300 - padding.top - padding.bottom;
- const maxDamage = Math.max(...data.map(d => d.damage), 100);
- const barWidth = chartWidth / data.length;
- ctx.strokeStyle = '#374151';
- ctx.lineWidth = 1;
- for (let i = 0; i <= 5; i++) {
- const y = padding.top + (chartHeight / 5) * i;
- ctx.beginPath();
- ctx.moveTo(padding.left, y);
- ctx.lineTo(800 - padding.right, y);
- ctx.stroke();
- ctx.fillStyle = '#9ca3af';
- ctx.font = '10px Arial';
- ctx.textAlign = 'right';
- ctx.fillText(Math.round(maxDamage - (maxDamage / 5) * i).toString(), padding.left - 5, y + 4);
- }
- const colors: Record<string, string> = {};
- let colorIndex = 0;
- const playerColors = ['#ef4444', '#eab308', '#22c55e', '#3b82f6'];
- for (const point of data) {
- if (!colors[point.period]) {
- colors[point.period] = playerColors[colorIndex % playerColors.length];
- colorIndex++;
- }
- }
- let groupStart = 0;
- for (let i = 0; i < data.length; i++) {
- if (i === data.length - 1 || data[i].day !== data[i + 1].day) {
- const groupData = data.slice(groupStart, i + 1);
- const groupWidth = (i - groupStart + 1) * barWidth;
- const groupX = padding.left + groupStart * barWidth;
- for (let j = 0; j < groupData.length; j++) {
- const point = groupData[j];
- const x = groupX + j * barWidth + barWidth / 2;
- const barHeight = (point.damage / maxDamage) * chartHeight;
- const y = padding.top + chartHeight - barHeight;
- ctx.fillStyle = point.isNight ? '#4b5563' : '#374151';
- ctx.fillRect(x - barWidth / 4, padding.top, barWidth / 2, chartHeight);
- ctx.fillStyle = '#ef4444';
- ctx.fillRect(x - barWidth / 4, y, barWidth / 2, barHeight);
- }
- groupStart = i + 1;
- }
- }
- ctx.fillStyle = '#9ca3af';
- ctx.font = '10px Arial';
- ctx.textAlign = 'center';
- let labelStart = 0;
- for (let i = 0; i < data.length; i++) {
- if (i === data.length - 1 || data[i].day !== data[i + 1].day) {
- const labelX = padding.left + (labelStart + (i - labelStart) / 2) * barWidth;
- ctx.fillText(`第${data[i].day}天`, labelX, 280);
- labelStart = i + 1;
- }
- }
- ctx.fillStyle = '#9ca3af';
- ctx.font = '12px Arial';
- ctx.textAlign = 'left';
- ctx.fillText('伤害', 10, 20);
-};
+  const canvas = damageChartCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const data = props.gameStats?.damageTimeSeries || []
+
+  if (data.length === 0) {
+    ctx.fillStyle = '#1f2937'
+    ctx.fillRect(0, 0, 800, 300)
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = '14px Arial'
+    ctx.textAlign = 'center'
+    ctx.fillText('暂无数据', 400, 150)
+    return
+  }
+
+  ctx.fillStyle = '#1f2937'
+  ctx.fillRect(0, 0, 800, 300)
+
+  const padding = { top: 40, right: 140, bottom: 60, left: 60 }
+  const chartWidth = 800 - padding.left - padding.right
+  const chartHeight = 300 - padding.top - padding.bottom
+
+  let maxDamage = 0
+  const playerIds = new Set<string>()
+  data.forEach(point => {
+    if (point.perPlayer) {
+      Object.entries(point.perPlayer).forEach(([pid, dmg]) => {
+        playerIds.add(pid)
+        if (dmg > maxDamage) maxDamage = dmg
+      })
+    }
+  })
+  if (maxDamage === 0) maxDamage = 100
+
+  ctx.strokeStyle = '#374151'
+  ctx.lineWidth = 1
+  for (let i = 0; i <= 5; i++) {
+    const y = padding.top + (chartHeight / 5) * i
+    ctx.beginPath()
+    ctx.moveTo(padding.left, y)
+    ctx.lineTo(800 - padding.right, y)
+    ctx.stroke()
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = '10px Arial'
+    ctx.textAlign = 'right'
+    ctx.fillText(Math.round(maxDamage - (maxDamage / 5) * i).toString(), padding.left - 5, y + 4)
+  }
+
+  const xStep = data.length > 0 ? chartWidth / data.length : 0
+  for (let i = 0; i < data.length; i++) {
+    if (data[i].isNight) {
+      ctx.fillStyle = 'rgba(75, 85, 99, 0.3)'
+      ctx.fillRect(padding.left + i * xStep, padding.top, xStep, chartHeight)
+    }
+  }
+
+  const playerDataMap: Record<string, Array<{ x: number; y: number; damage: number }>> = {}
+  playerIds.forEach(pid => {
+    playerDataMap[pid] = []
+  })
+
+  for (let i = 0; i < data.length; i++) {
+    const point = data[i]
+    const x = padding.left + (i + 0.5) * xStep
+    if (point.perPlayer) {
+      playerIds.forEach(pid => {
+        const damage = point.perPlayer[pid] || 0
+        const y = padding.top + chartHeight - (damage / maxDamage) * chartHeight
+        if (playerDataMap[pid]) {
+          playerDataMap[pid].push({ x, y, damage })
+        }
+      })
+    }
+  }
+
+  const playerInfo: Record<string, { name: string; classType: PlayerClass }> = {}
+  if (props.gameStats) {
+    props.gameStats.playerStats.forEach(ps => {
+      playerInfo[ps.playerId] = { name: ps.playerName, classType: ps.classType }
+    })
+  }
+
+  playerIds.forEach(pid => {
+    const points = playerDataMap[pid]
+    if (!points || points.length === 0) return
+    const color = playerColors[playerInfo[pid]?.classType || ''] || '#9ca3af'
+
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    points.forEach((p, idx) => {
+      if (idx === 0) ctx.moveTo(p.x, p.y)
+      else ctx.lineTo(p.x, p.y)
+    })
+    ctx.stroke()
+
+    ctx.fillStyle = color
+    points.forEach(p => {
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    })
+  })
+
+  ctx.fillStyle = '#9ca3af'
+  ctx.font = '10px Arial'
+  ctx.textAlign = 'center'
+  let lastDay = -1
+  for (let i = 0; i < data.length; i++) {
+    if (data[i].day !== lastDay) {
+      const labelX = padding.left + (i + 0.5) * xStep
+      ctx.fillText(`第${data[i].day}天`, labelX, 280)
+      lastDay = data[i].day
+    }
+  }
+  ctx.font = '9px Arial'
+  for (let i = 0; i < data.length; i++) {
+    const labelX = padding.left + (i + 0.5) * xStep
+    ctx.fillText(data[i].isNight ? '夜' : '昼', labelX, 292)
+  }
+
+  ctx.fillStyle = '#9ca3af'
+  ctx.font = '12px Arial'
+  ctx.textAlign = 'left'
+  ctx.fillText('伤害输出', 10, 20)
+
+  const legendX = 800 - padding.right + 10
+  ctx.font = '11px Arial'
+  ctx.textAlign = 'left'
+  let legendY = padding.top
+  playerIds.forEach(pid => {
+    const info = playerInfo[pid]
+    if (!info) return
+    const color = playerColors[info.classType] || '#9ca3af'
+    ctx.fillStyle = color
+    ctx.fillRect(legendX, legendY - 6, 14, 3)
+    ctx.beginPath()
+    ctx.arc(legendX + 7, legendY - 4, 3, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(info.name, legendX + 22, legendY)
+    legendY += 18
+  })
+}
+
 const handleCanvasMouseDown = (e: MouseEvent) => {
- const canvas = formationCanvas.value;
- if (!canvas)
- return;
- const rect = canvas.getBoundingClientRect();
- const x = e.clientX - rect.left;
- const y = e.clientY - rect.top;
- for (const player of players.value) {
- const pos = formationPositions.value.get(player.id);
- const playerX = pos?.x ?? player.position.x / 2;
- const playerY = pos?.y ?? player.position.y / 2;
- const dist = Math.sqrt((x - playerX) ** 2 + (y - playerY) ** 2);
- if (dist < 15) {
- draggingPlayer.value = player.id;
- break;
- }
- }
-};
+  const canvas = formationCanvas.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  for (const player of players.value) {
+    const pos = formationPositions.value.get(player.id)
+    const playerX = pos?.x ?? player.position.x / 2
+    const playerY = pos?.y ?? player.position.y / 2
+    const dist = Math.sqrt((x - playerX) ** 2 + (y - playerY) ** 2)
+    if (dist < 15) {
+      draggingPlayer.value = player.id
+      break
+    }
+  }
+}
+
 const handleCanvasMouseMove = (e: MouseEvent) => {
- if (!draggingPlayer.value)
- return;
- const canvas = formationCanvas.value;
- if (!canvas)
- return;
- const rect = canvas.getBoundingClientRect();
- const x = Math.max(0, Math.min(400, e.clientX - rect.left));
- const y = Math.max(0, Math.min(400, e.clientY - rect.top));
- formationPositions.value.set(draggingPlayer.value, { x, y });
- drawFormationEditor();
-};
+  if (!draggingPlayer.value) return
+  const canvas = formationCanvas.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = Math.max(0, Math.min(400, e.clientX - rect.left))
+  const y = Math.max(0, Math.min(400, e.clientY - rect.top))
+  formationPositions.value.set(draggingPlayer.value, { x, y })
+  drawFormationEditor()
+}
+
 const handleCanvasMouseUp = () => {
- draggingPlayer.value = null;
-};
+  draggingPlayer.value = null
+}
+
 const handleDeployFormation = () => {
- const positions: FormationPosition[] = [];
- formationPositions.value.forEach((pos, playerId) => {
- positions.push({
- playerId,
- x: pos.x * 2,
- y: pos.y * 2,
- });
- });
- emit('deployFormation', positions);
-};
+  const positions: FormationPosition[] = []
+  formationPositions.value.forEach((pos, playerId) => {
+    positions.push({
+      playerId,
+      x: pos.x * 2,
+      y: pos.y * 2,
+    })
+  })
+  emit('deployFormation', positions)
+}
+
 const handleSavePreset = () => {
- if (!presetName.value.trim())
- return;
- const positions: FormationPosition[] = [];
- formationPositions.value.forEach((pos, playerId) => {
- positions.push({
- playerId,
- x: pos.x * 2,
- y: pos.y * 2,
- });
- });
- emit('savePreset', presetName.value.trim(), positions);
- presetName.value = '';
-};
+  if (!presetName.value.trim()) return
+  const positions: FormationPosition[] = []
+  formationPositions.value.forEach((pos, playerId) => {
+    positions.push({
+      playerId,
+      x: pos.x * 2,
+      y: pos.y * 2,
+    })
+  })
+  emit('savePreset', presetName.value.trim(), positions)
+  presetName.value = ''
+}
+
 const handleLoadPreset = (presetId: string) => {
- const preset = props.presets.find(p => p.id === presetId);
- if (!preset)
- return;
- formationPositions.value.clear();
- for (const pos of preset.positions) {
- formationPositions.value.set(pos.playerId, { x: pos.x / 2, y: pos.y / 2 });
- }
- drawFormationEditor();
-};
+  const preset = props.presets.find(p => p.id === presetId)
+  if (!preset) return
+  formationPositions.value.clear()
+  for (const pos of preset.positions) {
+    formationPositions.value.set(pos.playerId, { x: pos.x / 2, y: pos.y / 2 })
+  }
+  drawFormationEditor()
+}
+
 const handleDeletePreset = (presetId: string) => {
- emit('deletePreset', presetId);
-};
+  emit('deletePreset', presetId)
+}
+
 const handleClearFormation = () => {
- formationPositions.value.clear();
- drawFormationEditor();
-};
+  formationPositions.value.clear()
+  drawFormationEditor()
+}
+
+let redrawTimer: number | null = null
+
 watch(() => props.gameState, () => {
- drawHeatmap();
-}, { deep: true });
+  drawHeatmap()
+}, { deep: true })
+
 watch(() => props.gameStats, () => {
- drawDamageChart();
-}, { deep: true });
-watch(() => props.presets, () => { }, { deep: true });
+  drawDamageChart()
+}, { deep: true })
+
+watch(() => props.visible, (newVal) => {
+  if (newVal) {
+    drawHeatmap()
+    drawFormationEditor()
+    drawDamageChart()
+    if (redrawTimer === null) {
+      redrawTimer = window.setInterval(() => {
+        if (activeTab.value === 'situation') drawHeatmap()
+        if (activeTab.value === 'formation') drawFormationEditor()
+        if (activeTab.value === 'stats') drawDamageChart()
+      }, 200) as unknown as number
+    }
+  } else {
+    if (redrawTimer !== null) {
+      clearInterval(redrawTimer)
+      redrawTimer = null
+    }
+  }
+})
+
 onMounted(() => {
- for (const player of players.value) {
- formationPositions.value.set(player.id, {
- x: player.position.x / 2,
- y: player.position.y / 2,
- });
- }
- drawHeatmap();
- drawFormationEditor();
- drawDamageChart();
-});
+  for (const player of players.value) {
+    formationPositions.value.set(player.id, {
+      x: player.position.x / 2,
+      y: player.position.y / 2,
+    })
+  }
+  drawHeatmap()
+  drawFormationEditor()
+  drawDamageChart()
+})
+
 onUnmounted(() => {
-});
+  if (redrawTimer !== null) {
+    clearInterval(redrawTimer)
+    redrawTimer = null
+  }
+})
 </script>

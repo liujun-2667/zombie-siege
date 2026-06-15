@@ -166,6 +166,15 @@ export class GameEngine {
       })
     }
 
+    const gameStats = this.gameStats.get(roomId)
+    if (gameStats) {
+      const playerStats = gameStats.playerStats.get(playerId)
+      if (playerStats) {
+        playerStats.playerName = playerName
+        playerStats.classType = classType
+      }
+    }
+
     gameState.players.push(player)
     return player
   }
@@ -242,15 +251,13 @@ export class GameEngine {
         hitZombies.push(zombie)
         zombie.health -= damage
         
+        const now = Date.now()
         const stats = this.gameStats.get(roomId)
         if (stats) {
           const playerStats = stats.playerStats.get(playerId)
           if (playerStats) {
             playerStats.totalDamage += damage
-            playerStats.dpsHistory.push(damage)
-            if (playerStats.dpsHistory.length > 50) {
-              playerStats.dpsHistory.shift()
-            }
+            playerStats.dpsHistory.push({ time: now, damage })
           }
         }
 
@@ -261,10 +268,7 @@ export class GameEngine {
             const playerStats = stats.playerStats.get(playerId)
             if (playerStats) {
               playerStats.totalDamage += 5
-              playerStats.dpsHistory.push(5)
-              if (playerStats.dpsHistory.length > 50) {
-                playerStats.dpsHistory.shift()
-              }
+              playerStats.dpsHistory.push({ time: now, damage: 5 })
             }
           }
         }
@@ -524,8 +528,21 @@ export class GameEngine {
     this.updateThreatGrid(roomId)
     this.updateResourceConsumption(roomId)
     this.updateDeploymentOrders(roomId)
+    this.cleanupDpsHistory(roomId, now)
 
     this.checkGameOver(roomId)
+  }
+
+  private cleanupDpsHistory(roomId: string, now: number): void {
+    const stats = this.gameStats.get(roomId)
+    if (!stats) return
+
+    const windowMs = 5000
+    stats.playerStats.forEach((playerStats) => {
+      playerStats.dpsHistory = playerStats.dpsHistory.filter(
+        event => now - event.time < windowMs
+      )
+    })
   }
 
   private switchTimeOfDay(roomId: string): void {
@@ -537,14 +554,18 @@ export class GameEngine {
       const period = gameState.timeOfDay === 'day' ? 'night' : 'day'
       const dayNum = gameState.timeOfDay === 'day' ? gameState.day : gameState.day - 1
       let totalDamage = 0
-      stats.playerStats.forEach(ps => {
-        totalDamage += ps.totalDamage
+      const perPlayer: Record<string, number> = {}
+      stats.playerStats.forEach((ps, id) => {
+        const damage = ps.totalDamage
+        totalDamage += damage
+        perPlayer[id] = Math.round(damage)
       })
       stats.damageTimeSeries.push({
         period: `第${dayNum}天${period === 'day' ? '白天' : '夜晚'}`,
         day: dayNum,
         isNight: period === 'night',
         damage: Math.round(totalDamage),
+        perPlayer,
       })
     }
 

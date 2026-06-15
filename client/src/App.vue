@@ -91,8 +91,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { gameStore, setPlayerName, setPlayerClass, resetGame, setCurrentRoom, setShowCommandPanel } from './stores/gameStore'
+import { ref, watch } from 'vue'
+import { gameStore, setPlayerName, setPlayerClass, resetGame, setCurrentRoom, setShowCommandPanel, setCommandPanelTab } from './stores/gameStore'
 import { useWebSocket } from './composables/useWebSocket'
 import type { Room, PlayerClass } from './types'
 
@@ -198,6 +198,22 @@ const handleLoadPreset = (presetId: string) => {
 const handleDeletePreset = (presetId: string) => {
   deleteFormationPreset(presetId)
 }
+
+// 监听游戏结束:自动打开CommandPanel并切换到统计tab
+watch(
+  () => gameStore.gameState?.gameOver,
+  (gameOver) => {
+    if (gameOver) {
+      // 请求最新统计数据
+      getGameStats()
+      // 短暂延迟以确保数据到达
+      setTimeout(() => {
+        setCommandPanelTab('stats')
+        setShowCommandPanel(true)
+      }, 300)
+    }
+  }
+)
 
 const handleRestart = () => {
   resetGame()

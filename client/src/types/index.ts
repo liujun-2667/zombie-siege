@@ -139,6 +139,11 @@ export interface FormationPreset {
   positions: FormationPosition[]
 }
 
+export interface DamageEvent {
+  time: number
+  damage: number
+}
+
 export interface PlayerStats {
   playerId: string
   playerName: string
@@ -155,7 +160,7 @@ export interface PlayerStats {
   deaths: number
   maxKillStreak: number
   currentKillStreak: number
-  dpsHistory: number[]
+  dpsHistory: DamageEvent[]
 }
 
 export interface DamageTimePoint {
@@ -163,6 +168,7 @@ export interface DamageTimePoint {
   day: number
   isNight: boolean
   damage: number
+  perPlayer: Record<string, number>
 }
 
 export interface GameStats {

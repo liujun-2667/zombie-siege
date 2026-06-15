@@ -18,6 +18,22 @@
         </div>
       </div>
       
+      <div class="bg-dark rounded-lg p-4 mb-6">
+        <h3 class="text-sm text-gray mb-3">选择职业</h3>
+        <div class="grid grid-cols-4 gap-2">
+          <div
+            v-for="classInfo in classes"
+            :key="classInfo.id"
+            class="p-2 rounded-lg text-center cursor-pointer transition-all"
+            :class="selectedClass === classInfo.id ? 'bg-primary border-2 border-accent' : 'bg-gray hover:bg-gray/80 border-2 border-transparent'"
+            @click="selectedClass = classInfo.id"
+          >
+            <div class="text-xl">{{ classInfo.icon }}</div>
+            <div class="text-xs text-light mt-1">{{ classInfo.name }}</div>
+          </div>
+        </div>
+      </div>
+      
       <div class="flex gap-4">
         <button
           class="flex-1 px-4 py-2 bg-gray hover:bg-gray/80 text-light rounded-lg transition-all"
@@ -27,8 +43,8 @@
         </button>
         <button
           class="flex-1 px-4 py-2 bg-primary hover:bg-primary-dark text-light font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="playerCount < 1"
-          @click="$emit('start')"
+          :disabled="playerCount < 1 || !selectedClass"
+          @click="handleStart"
         >
           开始游戏
         </button>
@@ -39,16 +55,30 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { Room } from '../types'
+import type { Room, PlayerClass } from '../types'
 
-defineProps<{
+const props = defineProps<{
   room: Room | null
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'leave'): void
-  (e: 'start'): void
+  (e: 'start', classType: PlayerClass): void
 }>()
 
 const playerCount = ref(1)
+const selectedClass = ref<PlayerClass | null>(null)
+
+const classes = [
+  { id: 'assault' as PlayerClass, name: '突击手', icon: '⚔️' },
+  { id: 'engineer' as PlayerClass, name: '工程师', icon: '🔧' },
+  { id: 'medic' as PlayerClass, name: '医疗兵', icon: '💉' },
+  { id: 'commander' as PlayerClass, name: '指挥官', icon: '🎖️' },
+]
+
+const handleStart = () => {
+  if (selectedClass.value) {
+    emit('start', selectedClass.value)
+  }
+}
 </script>

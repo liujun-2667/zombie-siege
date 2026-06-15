@@ -66,11 +66,6 @@
       @join="handleJoinRoomConfirm"
     />
     
-    <ClassSelection
-      :show="gameStore.showClassSelection"
-      @select="handleSelectClass"
-    />
-    
     <GameOverModal
       :show="gameStore.showGameOver"
       :result="gameStore.gameResult"
@@ -82,7 +77,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { gameStore, setPlayerName, setPlayerClass, setShowClassSelection, resetGame, setCurrentRoom } from './stores/gameStore'
+import { gameStore, setPlayerName, setPlayerClass, resetGame, setCurrentRoom } from './stores/gameStore'
 import { useWebSocket } from './composables/useWebSocket'
 import type { Room, PlayerClass } from './types'
 
@@ -90,7 +85,6 @@ import RoomList from './components/RoomList.vue'
 import CreateRoomModal from './components/CreateRoomModal.vue'
 import JoinRoomModal from './components/JoinRoomModal.vue'
 import RoomWaiting from './components/RoomWaiting.vue'
-import ClassSelection from './components/ClassSelection.vue'
 import GameCanvas from './components/GameCanvas.vue'
 import GameOverModal from './components/GameOverModal.vue'
 
@@ -129,14 +123,10 @@ const handleLeaveRoom = () => {
   leaveRoom()
 }
 
-const handleStartGame = () => {
-  startGame()
-}
-
-const handleSelectClass = (classType: PlayerClass) => {
+const handleStartGame = (classType: PlayerClass) => {
   setPlayerClass(classType)
   selectClass(classType)
-  setShowClassSelection(false)
+  startGame()
 }
 
 const handleMove = (x: number, y: number) => {

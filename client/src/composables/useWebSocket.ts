@@ -1,8 +1,14 @@
 import { ref, onMounted, onUnmounted } from 'vue'
-import { gameStore, setRooms, setConnected, setCurrentRoom, setShowClassSelection, setGameState, setShowGameOver } from '../stores/gameStore'
+import { gameStore, setRooms, setConnected, setCurrentRoom, setGameState, setShowGameOver } from '../stores/gameStore'
 import type { Room, GameState, PlayerClass } from '../types'
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001'
+const getWsUrl = () => {
+  if (import.meta.env.MODE === 'production') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}/ws/`
+  }
+  return import.meta.env.VITE_WS_URL || 'ws://localhost:3001'
+}
 
 export function useWebSocket() {
   const ws = ref<WebSocket | null>(null)
@@ -13,7 +19,10 @@ export function useWebSocket() {
 
     isConnecting.value = true
     
-    ws.value = new WebSocket(WS_URL)
+    const url = getWsUrl()
+    console.log('Connecting to WebSocket:', url)
+    
+    ws.value = new WebSocket(url)
 
     ws.value.onopen = () => {
       console.log('WebSocket connected')
@@ -91,7 +100,6 @@ export function useWebSocket() {
       }
 
       case 'game_started': {
-        setShowClassSelection(true)
         break
       }
 

@@ -11,6 +11,13 @@
       @touchstart="handleTouchStart"
     ></canvas>
     
+    <canvas
+      ref="minimapRef"
+      class="absolute top-4 right-4 border-2 border-primary rounded-lg"
+      :width="160"
+      :height="160"
+    ></canvas>
+    
     <div class="absolute bottom-4 left-1/2 -translate-x-1/2">
       <div class="flex items-center gap-4 bg-dark/80 rounded-lg px-4 py-2 border border-gray">
         <button
@@ -43,7 +50,7 @@
       <div class="text-sm text-gray">剩余: <span class="text-light">{{ Math.floor(timeRemaining || 0) }}s</span></div>
     </div>
     
-    <div class="absolute top-4 right-4 flex flex-col gap-2">
+    <div class="absolute top-4 right-[172px] flex flex-col gap-2">
       <div
         v-for="player in players"
         :key="player.id"
@@ -83,6 +90,7 @@ const emit = defineEmits<{
 }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const minimapRef = ref<HTMLCanvasElement | null>(null)
 const mousePos = ref({ x: 0, y: 0 })
 let animationId: number
 
@@ -181,6 +189,8 @@ const draw = () => {
   if (timeOfDay.value === 'night') {
     drawLight(ctx)
   }
+
+  drawMinimap()
 
   animationId = requestAnimationFrame(draw)
 }
@@ -356,6 +366,63 @@ const drawLight = (ctx: CanvasRenderingContext2D) => {
 
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, 800, 800)
+}
+
+const drawMinimap = () => {
+  const minimap = minimapRef.value
+  if (!minimap) return
+
+  const ctx = minimap.getContext('2d')
+  if (!ctx) return
+
+  const scale = 160 / 800
+
+  ctx.fillStyle = '#1a1a2e'
+  ctx.fillRect(0, 0, 160, 160)
+
+  ctx.strokeStyle = '#2d5a3d'
+  ctx.lineWidth = 2
+  const baseSize = 200 * scale
+  const centerX = 80
+  const centerY = 80
+  ctx.strokeRect(centerX - baseSize / 2, centerY - baseSize / 2, baseSize, baseSize)
+
+  if (props.gameState) {
+    for (const zombie of props.gameState.zombies) {
+      ctx.fillStyle = '#22c55e'
+      ctx.beginPath()
+      ctx.arc(zombie.position.x * scale, zombie.position.y * scale, 3, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    for (const player of props.gameState.players) {
+      let color = '#ef4444'
+      switch (player.classType) {
+        case 'engineer': color = '#eab308'; break
+        case 'medic': color = '#22c55e'; break
+        case 'commander': color = '#3b82f6'; break
+      }
+      ctx.fillStyle = player.isDead ? '#6b7280' : color
+      ctx.beginPath()
+      ctx.arc(player.position.x * scale, player.position.y * scale, 4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    for (const point of props.gameState.resourcePoints) {
+      if (!point.isDepleted) {
+        ctx.fillStyle = '#FFD700'
+        ctx.beginPath()
+        ctx.arc(point.position.x * scale, point.position.y * scale, 2, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+  }
+
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 8px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'top'
+  ctx.fillText('小地图', 80, 2)
 }
 
 onMounted(() => {

@@ -364,6 +364,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { gameStore } from '../stores/gameStore'
 import type { GameState, PlayerState, PlayerClass, FormationPreset, FormationPosition, GameStats, PlayerStats, ThreatGridSnapshot } from '../types'
 
 const props = defineProps<{

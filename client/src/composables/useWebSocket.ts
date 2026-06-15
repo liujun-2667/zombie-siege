@@ -1,6 +1,6 @@
 import { ref, onMounted, onUnmounted } from 'vue'
-import { gameStore, setRooms, setConnected, setCurrentRoom, setGameState, setShowGameOver, setFormationPresets, setGameStats, setPostMatchStats } from '../stores/gameStore'
-import type { Room, GameState, PlayerClass, WeaponType, FormationPreset, FormationPosition, GameStats } from '../types'
+import { gameStore, setRooms, setConnected, setCurrentRoom, setGameState, setShowGameOver, setFormationPresets, setGameStats, setPostMatchStats, setReplayData, setShowReplayPlayer, setCurrentReplayRoomId } from '../stores/gameStore'
+import type { Room, GameState, PlayerClass, WeaponType, FormationPreset, FormationPosition, GameStats, ReplayData, ReplayFrame } from '../types'
 
 const getWsUrl = () => {
   if (import.meta.env.MODE === 'production') {
@@ -13,6 +13,13 @@ const getWsUrl = () => {
 export function useWebSocket() {
   const ws = ref<WebSocket | null>(null)
   const isConnecting = ref(false)
+
+  // Replay state
+  const replayData = ref<ReplayData | null>(null)
+  const replayLoading = ref(false)
+  const replayRoomId = ref<string | null>(null)
+  const pendingFrames = ref<ReplayFrame[]>([])
+  const expectedTotalFrames = ref(0)
 
   const connect = () => {
     if (ws.value?.readyState === WebSocket.OPEN) return
@@ -161,6 +168,46 @@ export function useWebSocket() {
         break
       }
 
+      case 'replay_metadata': {
+        replayLoading.value = true
+        replayRoomId.value = message.payload.roomId as string
+        expectedTotalFrames.value = message.payload.totalFrames as number
+        pendingFrames.value = []
+        break
+      }
+
+      case 'replay_shard': {
+        const frames = message.payload.frames as ReplayFrame[]
+        pendingFrames.value.push(...frames)
+        break
+      }
+
+      case 'replay_complete': {
+        if (replayRoomId.value && pendingFrames.value.length > 0) {
+          const replayInfo = {
+            roomId: replayRoomId.value,
+            startTime: 0,
+            endTime: 0,
+            duration: 0,
+            victory: false,
+            frames: pendingFrames.value,
+          }
+          // Sort frames by timestamp
+          replayInfo.frames.sort((a, b) => a.timestamp - b.timestamp)
+          setReplayData(replayInfo)
+          setCurrentReplayRoomId(replayRoomId.value)
+          setShowReplayPlayer(true)
+        }
+        replayLoading.value = false
+        break
+      }
+
+      case 'replay_error': {
+        console.error('Replay error:', message.payload.message)
+        replayLoading.value = false
+        break
+      }
+
       case 'error': {
         console.error('Server error:', message.payload.message)
         break
@@ -302,6 +349,13 @@ export function useWebSocket() {
     })
   }
 
+  const getReplay = (roomId: string) => {
+    sendMessage({
+      type: 'get_replay',
+      payload: { roomId },
+    })
+  }
+
   onMounted(() => {
     connect()
   })
@@ -334,5 +388,6 @@ export function useWebSocket() {
     deleteFormationPreset,
     cancelDeployment,
     getGameStats,
+    getReplay,
   }
 }

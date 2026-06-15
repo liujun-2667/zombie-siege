@@ -184,6 +184,12 @@
           再来一局
         </button>
         <button
+          class="px-6 py-3 bg-accent hover:bg-accent/80 text-light font-semibold rounded-lg transition-all"
+          @click="handleWatchReplay"
+        >
+          📼 观看回放
+        </button>
+        <button
           class="px-6 py-3 bg-gray hover:bg-gray/80 text-light font-semibold rounded-lg transition-all"
           @click="$emit('home')"
         >
@@ -211,6 +217,7 @@ defineProps<{
 defineEmits<{
   (e: 'restart'): void
   (e: 'home'): void
+  (e: 'watchReplay', roomId: string): void
 }>()
 
 const stats = ref({
@@ -282,6 +289,16 @@ const getClassName = (classType: PlayerClass): string => {
     case 'medic': return '医疗兵'
     case 'commander': return '指挥官'
     default: return '未知'
+  }
+}
+
+const handleWatchReplay = () => {
+  if (gameStore.currentRoom) {
+    // Emit with roomId from current room
+    const roomId = gameStore.currentRoom.id
+    // Store roomId in a temporary place for App.vue to access
+    ;(gameStore as any)._pendingReplayRoomId = roomId
+    emit('watchReplay', roomId)
   }
 }
 

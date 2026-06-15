@@ -1,5 +1,6 @@
 const mockRedisData = new Map<string, Record<string, string>>()
 const mockRedisSets = new Map<string, Set<string>>()
+const mockReplayData = new Map<string, string>()
 
 export const redisClient = {
   on: (event: string, callback: (err: any) => void) => {},
@@ -48,6 +49,7 @@ export const redisClient = {
   del: async (key: string) => {
     mockRedisData.delete(key)
     mockRedisSets.delete(key)
+    mockReplayData.delete(key)
     return 1
   },
   
@@ -61,6 +63,14 @@ export const redisClient = {
     }
     return keys
   },
+}
+
+export async function setReplay(roomId: string, data: string): Promise<void> {
+  mockReplayData.set(`replay:${roomId}`, data)
+}
+
+export async function getReplay(roomId: string): Promise<string | null> {
+  return mockReplayData.get(`replay:${roomId}`) || null
 }
 
 export async function connectRedis(): Promise<void> {

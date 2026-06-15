@@ -1,5 +1,5 @@
 import WebSocket, { WebSocketServer } from 'ws'
-import { connectRedis } from './redis/client'
+import { connectRedis, getReplay } from './redis/client'
 import { roomManager } from './managers/roomManager'
 import { gameEngine } from './game/GameEngine'
 import { generateId } from './utils/helpers'
@@ -401,6 +401,65 @@ async function handleMessage(playerId: string, message: ClientMessage): Promise<
           },
         })
       }
+      break
+    }
+
+    case 'get_replay': {
+      const { roomId } = message.payload as { roomId: string }
+      const replayJson = await getReplay(roomId)
+      
+      if (!replayJson) {
+        sendToPlayer(playerId, {
+          type: 'replay_error',
+          payload: { message: 'Replay not found' },
+        })
+        break
+      }
+
+      const replayData = JSON.parse(replayJson)
+      const frames = replayData.frames
+      const totalFrames = frames.length
+      const SHARD_SIZE = 50
+
+      // Send metadata first
+      sendToPlayer(playerId, {
+        type: 'replay_metadata',
+        payload: {
+          roomId,
+          totalFrames,
+          duration: replayData.duration,
+          victory: replayData.victory,
+          startTime: replayData.startTime,
+          endTime: replayData.endTime,
+        },
+      })
+
+      // Send frames in shards
+      for (let i = 0; i < totalFrames; i += SHARD_SIZE) {
+        const shard = frames.slice(i, Math.min(i + SHARD_SIZE, totalFrames))
+        const shardIndex = Math.floor(i / SHARD_SIZE)
+        const totalShards = Math.ceil(totalFrames / SHARD_SIZE)
+
+        sendToPlayer(playerId, {
+          type: 'replay_shard',
+          payload: {
+            shardIndex,
+            totalShards,
+            frames: shard,
+          },
+        })
+
+        // Small delay between shards to prevent overwhelming the client
+        if (i + SHARD_SIZE < totalFrames) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+      }
+
+      // Send completion message
+      sendToPlayer(playerId, {
+        type: 'replay_complete',
+        payload: { roomId },
+      })
       break
     }
 

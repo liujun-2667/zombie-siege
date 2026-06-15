@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { GameState, PlayerState, ZombieState, Room, PlayerClass, FormationPreset, GameStats } from '../types'
+import type { GameState, PlayerState, ZombieState, Room, PlayerClass, FormationPreset, GameStats, ReplayData } from '../types'
 
 export interface GameStore {
   rooms: Room[]
@@ -17,6 +17,9 @@ export interface GameStore {
   formationPresets: FormationPreset[]
   gameStats: GameStats | null
   postMatchStats: GameStats | null
+  replayData: ReplayData | null
+  showReplayPlayer: boolean
+  currentReplayRoomId: string | null
 }
 
 export const gameStore = reactive<GameStore>({
@@ -35,6 +38,9 @@ export const gameStore = reactive<GameStore>({
   formationPresets: [],
   gameStats: null,
   postMatchStats: null,
+  replayData: null,
+  showReplayPlayer: false,
+  currentReplayRoomId: null,
 })
 
 export function setRooms(rooms: Room[]) {
@@ -105,4 +111,16 @@ export function resetGame() {
   gameStore.formationPresets = []
   gameStore.gameStats = null
   gameStore.postMatchStats = null
+}
+
+export function setReplayData(data: ReplayData | null) {
+  gameStore.replayData = data
+}
+
+export function setShowReplayPlayer(show: boolean) {
+  gameStore.showReplayPlayer = show
+}
+
+export function setCurrentReplayRoomId(roomId: string | null) {
+  gameStore.currentReplayRoomId = roomId
 }

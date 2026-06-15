@@ -194,6 +194,33 @@ export interface DeploymentOrder {
   active: boolean
 }
 
+export interface ReplayFrame {
+  timestamp: number
+  players: PlayerState[]
+  zombies: ZombieState[]
+  structures: StructureState[]
+  gates: GateState[]
+  resourcePoints: ResourcePoint[]
+  resources: {
+    ammo: number
+    wood: number
+    iron: number
+    medkit: number
+  }
+  day: number
+  timeOfDay: TimeOfDay
+  currentNight: number
+}
+
+export interface ReplayData {
+  roomId: string
+  startTime: number
+  endTime: number
+  duration: number
+  victory: boolean
+  frames: ReplayFrame[]
+}
+
 export interface GameState {
   roomId: string
   day: number

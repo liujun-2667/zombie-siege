@@ -87,6 +87,16 @@
       @load-preset="handleLoadPreset"
       @delete-preset="handleDeletePreset"
     />
+
+    <ReplayPlayer />
+
+    <GameOverModal
+      :show="gameStore.showGameOver"
+      :result="gameStore.gameResult"
+      @restart="handleRestart"
+      @home="handleBackToHome"
+      @watch-replay="handleWatchReplay"
+    />
   </div>
 </template>
 
@@ -103,8 +113,9 @@ import RoomWaiting from './components/RoomWaiting.vue'
 import GameCanvas from './components/GameCanvas.vue'
 import GameOverModal from './components/GameOverModal.vue'
 import CommandPanel from './components/CommandPanel.vue'
+import ReplayPlayer from './components/ReplayPlayer.vue'
 
-const { createRoom, joinRoom, quickMatch, leaveRoom, startGame, selectClass, move, shoot, scavenge, build, upgradeWeapon, selectSkill, deployFormation, saveFormationPreset, loadFormationPreset, deleteFormationPreset, getFormationPresets, getGameStats } = useWebSocket()
+const { createRoom, joinRoom, quickMatch, leaveRoom, startGame, selectClass, move, shoot, scavenge, build, upgradeWeapon, selectSkill, deployFormation, saveFormationPreset, loadFormationPreset, deleteFormationPreset, getFormationPresets, getGameStats, getReplay } = useWebSocket()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
@@ -223,5 +234,11 @@ const handleRestart = () => {
 const handleBackToHome = () => {
   resetGame()
   setCurrentRoom(null)
+}
+
+const handleWatchReplay = (roomId: string) => {
+  // Hide game over modal when starting replay
+  gameStore.showGameOver = false
+  getReplay(roomId)
 }
 </script>

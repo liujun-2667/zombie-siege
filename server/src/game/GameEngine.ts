@@ -1,7 +1,8 @@
-import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode, GameStats, PlayerStats, ThreatGrid, ThreatGridSnapshot, FormationPreset, FormationPosition, DeploymentOrder } from '../types'
+import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode, GameStats, PlayerStats, ThreatGrid, ThreatGridSnapshot, FormationPreset, FormationPosition, DeploymentOrder, ReplayFrame, ReplayData } from '../types'
 import { GAME_CONFIG, PLAYER_CLASSES, ZOMBIE_CONFIG, STRUCTURE_CONFIG, WEAPON_CONFIG, SKILL_TREE_CONFIG } from '../config/gameConfig'
 import { generateId, getDistance, getRandomSpawnPosition, clamp } from '../utils/helpers'
 import { roomManager } from '../managers/roomManager'
+import { setReplay } from '../redis/client'
 
 export class GameEngine {
   private gameStates: Map<string, GameState> = new Map()
@@ -15,6 +16,10 @@ export class GameEngine {
   private lastHeatmapSnapshot: Map<string, number> = new Map()
   private static readonly HEATMAP_SNAPSHOT_INTERVAL = 2000 // 2 seconds
   private static readonly HEATMAP_MAX_SNAPSHOTS = 30 // 30 frames = 60 seconds
+  private replayFrames: Map<string, ReplayFrame[]> = new Map()
+  private replayStartTime: Map<string, number> = new Map()
+  private replayIntervals: Map<string, NodeJS.Timeout> = new Map()
+  private static readonly REPLAY_SNAPSHOT_INTERVAL = 200 // 200ms per frame
 
   createGameState(roomId: string): GameState {
     const centerX = GAME_CONFIG.MAP_WIDTH / 2
@@ -501,7 +506,47 @@ export class GameEngine {
     this.gameStates.set(roomId, gameState)
     this.lastUpdate.set(roomId, Date.now())
 
+    // Initialize replay recording
+    this.replayFrames.set(roomId, [])
+    this.replayStartTime.set(roomId, Date.now())
+
     this.startGameLoop(roomId)
+    this.startReplayRecording(roomId)
+  }
+
+  private startReplayRecording(roomId: string): void {
+    const interval = setInterval(() => {
+      this.captureReplaySnapshot(roomId)
+    }, GameEngine.REPLAY_SNAPSHOT_INTERVAL)
+
+    this.replayIntervals.set(roomId, interval)
+  }
+
+  private captureReplaySnapshot(roomId: string): void {
+    const gameState = this.gameStates.get(roomId)
+    const frames = this.replayFrames.get(roomId)
+    const startTime = this.replayStartTime.get(roomId)
+
+    if (!gameState || !frames || !startTime) return
+
+    const snapshot: ReplayFrame = {
+      timestamp: Date.now() - startTime,
+      players: gameState.players.map(p => ({
+        ...p,
+        skillTree: [], // Skip skill tree to reduce size
+        skills: [],
+      })),
+      zombies: gameState.zombies.map(z => ({ ...z })),
+      structures: gameState.structures.map(s => ({ ...s })),
+      gates: gameState.gates.map(g => ({ ...g })),
+      resourcePoints: gameState.resourcePoints.map(r => ({ ...r })),
+      resources: { ...gameState.resources },
+      day: gameState.day,
+      timeOfDay: gameState.timeOfDay,
+      currentNight: gameState.currentNight,
+    }
+
+    frames.push(snapshot)
   }
 
   private startGameLoop(roomId: string): void {
@@ -908,6 +953,45 @@ export class GameEngine {
       clearInterval(loop)
       this.gameLoops.delete(roomId)
     }
+
+    // Stop replay recording
+    const replayInterval = this.replayIntervals.get(roomId)
+    if (replayInterval) {
+      clearInterval(replayInterval)
+      this.replayIntervals.delete(roomId)
+    }
+
+    // Save replay to Redis
+    this.saveReplay(roomId)
+  }
+
+  private async saveReplay(roomId: string): Promise<void> {
+    const frames = this.replayFrames.get(roomId)
+    const startTime = this.replayStartTime.get(roomId)
+    const gameState = this.gameStates.get(roomId)
+
+    if (!frames || !startTime || !gameState) return
+
+    const endTime = Date.now()
+    const replayData: ReplayData = {
+      roomId,
+      startTime,
+      endTime,
+      duration: endTime - startTime,
+      victory: gameState.victory,
+      frames,
+    }
+
+    try {
+      await setReplay(roomId, JSON.stringify(replayData))
+      console.log(`Replay saved for room ${roomId} with ${frames.length} frames`)
+    } catch (error) {
+      console.error(`Failed to save replay for room ${roomId}:`, error)
+    }
+
+    // Clean up replay data
+    this.replayFrames.delete(roomId)
+    this.replayStartTime.delete(roomId)
   }
 
   getGameState(roomId: string): GameState | undefined {
@@ -1097,6 +1181,8 @@ export class GameEngine {
     this.lastResourceSnapshot.delete(roomId)
     this.heatmapSnapshotInterval.delete(roomId)
     this.lastHeatmapSnapshot.delete(roomId)
+    this.replayFrames.delete(roomId)
+    this.replayStartTime.delete(roomId)
   }
 }
 

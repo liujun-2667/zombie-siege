@@ -293,11 +293,8 @@ const getClassName = (classType: PlayerClass): string => {
 }
 
 const handleWatchReplay = () => {
-  if (gameStore.currentRoom) {
-    // Emit with roomId from current room
-    const roomId = gameStore.currentRoom.id
-    // Store roomId in a temporary place for App.vue to access
-    ;(gameStore as any)._pendingReplayRoomId = roomId
+  const roomId = gameStore.lastGameOverRoomId
+  if (roomId) {
     emit('watchReplay', roomId)
   }
 }

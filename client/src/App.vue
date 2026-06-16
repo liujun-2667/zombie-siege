@@ -69,13 +69,6 @@
       @join="handleJoinRoomConfirm"
     />
     
-    <GameOverModal
-      :show="gameStore.showGameOver"
-      :result="gameStore.gameResult"
-      @restart="handleRestart"
-      @home="handleBackToHome"
-    />
-    
     <CommandPanel
       :visible="gameStore.showCommandPanel"
       :game-state="gameStore.gameState"

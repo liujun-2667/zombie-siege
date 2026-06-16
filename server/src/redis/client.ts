@@ -1,6 +1,9 @@
 const mockRedisData = new Map<string, Record<string, string>>()
 const mockRedisSets = new Map<string, Set<string>>()
-const mockReplayData = new Map<string, string>()
+const mockReplayData = new Map<string, { data: string; expiresAt: number }>()
+
+// TTL for replay data: 1 hour in milliseconds
+const REPLAY_TTL_MS = 60 * 60 * 1000
 
 export const redisClient = {
   on: (event: string, callback: (err: any) => void) => {},
@@ -65,12 +68,33 @@ export const redisClient = {
   },
 }
 
+// Clean up expired replay data
+function cleanExpiredReplayData() {
+  const now = Date.now()
+  for (const [key, value] of mockReplayData.entries()) {
+    if (value.expiresAt <= now) {
+      mockReplayData.delete(key)
+    }
+  }
+}
+
 export async function setReplay(roomId: string, data: string): Promise<void> {
-  mockReplayData.set(`replay:${roomId}`, data)
+  cleanExpiredReplayData()
+  mockReplayData.set(`replay:${roomId}`, {
+    data,
+    expiresAt: Date.now() + REPLAY_TTL_MS,
+  })
 }
 
 export async function getReplay(roomId: string): Promise<string | null> {
-  return mockReplayData.get(`replay:${roomId}`) || null
+  cleanExpiredReplayData()
+  const entry = mockReplayData.get(`replay:${roomId}`)
+  if (!entry) return null
+  if (entry.expiresAt <= Date.now()) {
+    mockReplayData.delete(`replay:${roomId}`)
+    return null
+  }
+  return entry.data
 }
 
 export async function connectRedis(): Promise<void> {

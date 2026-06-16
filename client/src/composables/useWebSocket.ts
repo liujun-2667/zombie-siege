@@ -20,6 +20,7 @@ export function useWebSocket() {
   const replayRoomId = ref<string | null>(null)
   const pendingFrames = ref<ReplayFrame[]>([])
   const expectedTotalFrames = ref(0)
+  const replayMetadata = ref<{ startTime: number; endTime: number; duration: number; victory: boolean } | null>(null)
 
   const connect = () => {
     if (ws.value?.readyState === WebSocket.OPEN) return
@@ -120,7 +121,7 @@ export function useWebSocket() {
         
         if (state.gameOver) {
           sendMessage({ type: 'get_game_stats', payload: {} })
-          setShowGameOver(true, state.victory ? 'victory' : 'defeat')
+          setShowGameOver(true, state.victory ? 'victory' : 'defeat', state.roomId)
         }
         break
       }
@@ -173,6 +174,12 @@ export function useWebSocket() {
         replayRoomId.value = message.payload.roomId as string
         expectedTotalFrames.value = message.payload.totalFrames as number
         pendingFrames.value = []
+        replayMetadata.value = {
+          startTime: message.payload.startTime as number,
+          endTime: message.payload.endTime as number,
+          duration: message.payload.duration as number,
+          victory: message.payload.victory as boolean,
+        }
         break
       }
 
@@ -184,12 +191,12 @@ export function useWebSocket() {
 
       case 'replay_complete': {
         if (replayRoomId.value && pendingFrames.value.length > 0) {
-          const replayInfo = {
+          const replayInfo: ReplayData = {
             roomId: replayRoomId.value,
-            startTime: 0,
-            endTime: 0,
-            duration: 0,
-            victory: false,
+            startTime: replayMetadata.value?.startTime || 0,
+            endTime: replayMetadata.value?.endTime || 0,
+            duration: replayMetadata.value?.duration || 0,
+            victory: replayMetadata.value?.victory || false,
             frames: pendingFrames.value,
           }
           // Sort frames by timestamp
@@ -199,6 +206,7 @@ export function useWebSocket() {
           setShowReplayPlayer(true)
         }
         replayLoading.value = false
+        replayMetadata.value = null
         break
       }
 

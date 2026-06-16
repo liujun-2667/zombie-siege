@@ -20,6 +20,7 @@ export interface GameStore {
   replayData: ReplayData | null
   showReplayPlayer: boolean
   currentReplayRoomId: string | null
+  lastGameOverRoomId: string | null
 }
 
 export const gameStore = reactive<GameStore>({
@@ -41,6 +42,7 @@ export const gameStore = reactive<GameStore>({
   replayData: null,
   showReplayPlayer: false,
   currentReplayRoomId: null,
+  lastGameOverRoomId: null,
 })
 
 export function setRooms(rooms: Room[]) {
@@ -75,9 +77,12 @@ export function setShowClassSelection(show: boolean) {
   gameStore.showClassSelection = show
 }
 
-export function setShowGameOver(show: boolean, result?: 'victory' | 'defeat') {
+export function setShowGameOver(show: boolean, result?: 'victory' | 'defeat', roomId?: string) {
   gameStore.showGameOver = show
   gameStore.gameResult = result || null
+  if (roomId) {
+    gameStore.lastGameOverRoomId = roomId
+  }
 }
 
 export function setShowCommandPanel(show: boolean) {
@@ -111,6 +116,7 @@ export function resetGame() {
   gameStore.formationPresets = []
   gameStore.gameStats = null
   gameStore.postMatchStats = null
+  gameStore.lastGameOverRoomId = null
 }
 
 export function setReplayData(data: ReplayData | null) {

@@ -227,6 +227,9 @@ const isMontageMode = ref(false)
 const currentHighlightIndex = ref(-1)
 const montageStartTime = ref(0)
 const montageEndTime = ref(0)
+const transitionOpacity = ref(1)
+const isTransitioning = ref(false)
+const transitionStart = ref(0)
 
 // Highlights panel
 const showHighlightsPanel = ref(true)
@@ -512,21 +515,44 @@ function gameLoop(timestamp: number) {
 
   currentTime.value += deltaTime * playbackSpeed.value
 
-  // Montage mode logic
+  // Montage mode transition handling
   if (isMontageMode.value && currentHighlightIndex.value >= 0) {
     const highlights = sortedHighlights.value
-    if (currentTime.value >= montageEndTime.value) {
-      // Move to next highlight
-      currentHighlightIndex.value++
-      if (currentHighlightIndex.value >= highlights.length) {
-        // End of montage
-        isMontageMode.value = false
-        currentHighlightIndex.value = -1
-        isPlaying.value = false
-        currentTime.value = totalTime.value
-        return
+    const transitionDuration = 500 // 0.5 seconds for fade in/out
+    
+    // Check if transitioning
+    if (isTransitioning.value) {
+      const elapsed = timestamp - transitionStart.value
+      if (elapsed >= transitionDuration) {
+        isTransitioning.value = false
+        transitionOpacity.value = 1
+      } else {
+        // Fade in
+        transitionOpacity.value = elapsed / transitionDuration
       }
-      setupMontageSegment()
+    } else {
+      // Check if approaching end of segment
+      const timeToEnd = montageEndTime.value - currentTime.value
+      if (timeToEnd <= transitionDuration && timeToEnd > 0) {
+        // Fade out
+        transitionOpacity.value = timeToEnd / transitionDuration
+      } else if (currentTime.value >= montageEndTime.value) {
+        // Move to next highlight
+        currentHighlightIndex.value++
+        if (currentHighlightIndex.value >= highlights.length) {
+          // End of montage
+          isMontageMode.value = false
+          currentHighlightIndex.value = -1
+          isPlaying.value = false
+          currentTime.value = totalTime.value
+          transitionOpacity.value = 1
+          return
+        }
+        // Start transition to next segment
+        isTransitioning.value = true
+        transitionStart.value = timestamp
+        setupMontageSegment()
+      }
     }
   }
 
@@ -539,6 +565,18 @@ function gameLoop(timestamp: number) {
   }
 
   renderFrame(currentTime.value)
+
+  // Draw transition overlay if transitioning
+  if (transitionOpacity.value < 1) {
+    const canvas = canvasRef.value
+    if (canvas) {
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${1 - transitionOpacity.value})`
+        ctx.fillRect(0, 0, 600, 600)
+      }
+    }
+  }
 
   if (isPlaying.value) {
     animationFrameId = requestAnimationFrame(gameLoop)

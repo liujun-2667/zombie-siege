@@ -1,4 +1,4 @@
-import { Room, RoomStatus, Difficulty, PlayerState } from '../types'
+import { Room, RoomStatus, Difficulty } from '../types'
 import { redisClient } from '../redis/client'
 import { generateId } from '../utils/helpers'
 import { GAME_CONFIG, DIFFICULTY_CONFIG } from '../config/gameConfig'

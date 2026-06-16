@@ -214,7 +214,7 @@ defineProps<{
   result: 'victory' | 'defeat' | null
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'restart'): void
   (e: 'home'): void
   (e: 'watchReplay', roomId: string): void

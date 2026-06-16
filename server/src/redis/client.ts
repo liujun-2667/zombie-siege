@@ -1,74 +1,13 @@
-const mockRedisData = new Map<string, Record<string, string>>()
-const mockRedisSets = new Map<string, Set<string>>()
-const mockReplayData = new Map<string, { data: string; expiresAt: number }>()
+import { createClient } from 'redis'
 
-// TTL for replay data: 1 hour in milliseconds
+// Mock data for fallback when Redis is not available
+const mockReplayData = new Map<string, { data: string; expiresAt: number }>()
 const REPLAY_TTL_MS = 60 * 60 * 1000
 
-export const redisClient = {
-  on: (event: string, callback: (err: any) => void) => {},
-  
-  connect: async () => {
-    console.log('Mock Redis connected')
-  },
-  
-  disconnect: async () => {},
-  
-  hSet: async (key: string, values: Record<string, string>) => {
-    if (!mockRedisData.has(key)) {
-      mockRedisData.set(key, {})
-    }
-    const data = mockRedisData.get(key)!
-    Object.assign(data, values)
-    return 1
-  },
-  
-  hGetAll: async (key: string) => {
-    return mockRedisData.get(key) || {}
-  },
-  
-  sAdd: async (key: string, value: string) => {
-    if (!mockRedisSets.has(key)) {
-      mockRedisSets.set(key, new Set())
-    }
-    const set = mockRedisSets.get(key)!
-    set.add(value)
-    return 1
-  },
-  
-  sRem: async (key: string, value: string) => {
-    const set = mockRedisSets.get(key)
-    if (set) {
-      set.delete(value)
-    }
-    return 1
-  },
-  
-  sMembers: async (key: string) => {
-    const set = mockRedisSets.get(key)
-    return set ? Array.from(set) : []
-  },
-  
-  del: async (key: string) => {
-    mockRedisData.delete(key)
-    mockRedisSets.delete(key)
-    mockReplayData.delete(key)
-    return 1
-  },
-  
-  keys: async (pattern: string) => {
-    const keys: string[] = []
-    const regex = new RegExp(pattern.replace('*', '.*'))
-    for (const key of mockRedisSets.keys()) {
-      if (regex.test(key)) {
-        keys.push(key)
-      }
-    }
-    return keys
-  },
-}
+let redisClient: ReturnType<typeof createClient> | null = null
+let isConnected = false
 
-// Clean up expired replay data
+// Clean up expired mock replay data
 function cleanExpiredReplayData() {
   const now = Date.now()
   for (const [key, value] of mockReplayData.entries()) {
@@ -78,30 +17,102 @@ function cleanExpiredReplayData() {
   }
 }
 
-export async function setReplay(roomId: string, data: string): Promise<void> {
-  cleanExpiredReplayData()
-  mockReplayData.set(`replay:${roomId}`, {
-    data,
-    expiresAt: Date.now() + REPLAY_TTL_MS,
-  })
-}
-
-export async function getReplay(roomId: string): Promise<string | null> {
-  cleanExpiredReplayData()
-  const entry = mockReplayData.get(`replay:${roomId}`)
-  if (!entry) return null
-  if (entry.expiresAt <= Date.now()) {
-    mockReplayData.delete(`replay:${roomId}`)
-    return null
-  }
-  return entry.data
-}
-
 export async function connectRedis(): Promise<void> {
-  await redisClient.connect()
-  console.log('Mock Redis connected successfully')
+  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
+  
+  try {
+    redisClient = createClient({
+      url: redisUrl,
+      socket: {
+        connectTimeout: 5000,
+        reconnectStrategy: (retries) => {
+          if (retries > 3) {
+            console.log('Redis connection failed, using in-memory fallback')
+            return false
+          }
+          return Math.min(retries * 100, 1000)
+        }
+      }
+    })
+
+    redisClient.on('error', (err) => {
+      console.error('Redis Client Error:', err)
+      isConnected = false
+    })
+
+    redisClient.on('connect', () => {
+      console.log('Redis connected successfully')
+      isConnected = true
+    })
+
+    await redisClient.connect()
+    isConnected = true
+    console.log('Redis connected:', redisUrl)
+  } catch (error) {
+    console.log('Failed to connect to Redis, using in-memory fallback:', error)
+    isConnected = false
+  }
 }
 
 export async function disconnectRedis(): Promise<void> {
-  await redisClient.disconnect()
+  if (redisClient) {
+    await redisClient.quit()
+    redisClient = null
+    isConnected = false
+  }
 }
+
+// Real Redis implementations
+export async function setReplay(roomId: string, data: string): Promise<void> {
+  const key = `replay:${roomId}`
+  
+  if (isConnected && redisClient) {
+    try {
+      // Use SET with EX for TTL (1 hour = 3600 seconds)
+      await redisClient.set(key, data, { EX: 3600 })
+      console.log(`Replay saved to Redis: ${key}`)
+      return
+    } catch (error) {
+      console.error('Failed to save replay to Redis:', error)
+    }
+  }
+  
+  // Fallback to in-memory with TTL
+  cleanExpiredReplayData()
+  mockReplayData.set(key, {
+    data,
+    expiresAt: Date.now() + REPLAY_TTL_MS,
+  })
+  console.log(`Replay saved to memory (fallback): ${key}`)
+}
+
+export async function getReplay(roomId: string): Promise<string | null> {
+  const key = `replay:${roomId}`
+  
+  if (isConnected && redisClient) {
+    try {
+      const data = await redisClient.get(key)
+      if (data) {
+        console.log(`Replay retrieved from Redis: ${key}`)
+        return data
+      }
+      return null
+    } catch (error) {
+      console.error('Failed to get replay from Redis:', error)
+    }
+  }
+  
+  // Fallback to in-memory
+  cleanExpiredReplayData()
+  const entry = mockReplayData.get(key)
+  if (!entry) return null
+  if (entry.expiresAt <= Date.now()) {
+    mockReplayData.delete(key)
+    return null
+  }
+  console.log(`Replay retrieved from memory (fallback): ${key}`)
+  return entry.data
+}
+
+// Also export the original redis client interface for other uses
+export { redisClient as getRedisClient, isConnected as isRedisConnected }

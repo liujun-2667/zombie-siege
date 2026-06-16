@@ -1,4 +1,4 @@
-import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode, GameStats, PlayerStats, ThreatGrid, ThreatGridSnapshot, FormationPreset, FormationPosition, DeploymentOrder, ReplayFrame, ReplayData } from '../types'
+import { GameState, PlayerState, ZombieState, StructureState, GateState, ResourcePoint, PlayerClass, ZombieType, TimeOfDay, WeaponType, SkillTreeNode, GameStats, PlayerStats, ThreatGrid, ThreatGridSnapshot, FormationPreset, FormationPosition, DeploymentOrder, ReplayFrame, ReplayData, HighlightMoment, HighlightEventType } from '../types'
 import { GAME_CONFIG, PLAYER_CLASSES, ZOMBIE_CONFIG, STRUCTURE_CONFIG, WEAPON_CONFIG, SKILL_TREE_CONFIG } from '../config/gameConfig'
 import { generateId, getDistance, getRandomSpawnPosition, clamp } from '../utils/helpers'
 import { roomManager } from '../managers/roomManager'
@@ -20,6 +20,12 @@ export class GameEngine {
   private replayStartTime: Map<string, number> = new Map()
   private replayIntervals: Map<string, NodeJS.Timeout> = new Map()
   private static readonly REPLAY_SNAPSHOT_INTERVAL = 200 // 200ms per frame
+  // 高光时刻相关存储
+  private highlights: Map<string, HighlightMoment[]> = new Map()
+  private playerKillTimestamps: Map<string, Map<string, number[]>> = new Map() // roomId -> playerId -> timestamps
+  private playerHealthHistory: Map<string, Map<string, { lowTime: number; recovered: boolean }>> = new Map()
+  private gateDangerTriggered: Map<string, Set<string>> = new Map() // roomId -> Set<gateId>
+  private teamWipeTriggered: Map<string, boolean> = new Map() // roomId -> triggered
 
   createGameState(roomId: string): GameState {
     const centerX = GAME_CONFIG.MAP_WIDTH / 2
@@ -371,6 +377,8 @@ export class GameEngine {
     const zombie = gameState.zombies.find(z => z.id === zombieId)
     if (!zombie) return
 
+    const isBoss = zombie.type === 'boss'
+
     const reward = ZOMBIE_CONFIG[zombie.type].reward
     gameState.resources.ammo += reward.ammo
     gameState.resources.wood += reward.wood
@@ -386,8 +394,7 @@ export class GameEngine {
       const killer = gameState.players.find(p => p.id === killerId)
       if (killer) {
         const isSpecial = zombie.type !== 'normal'
-        const isBoss = zombie.type === 'boss'
-        
+
         if (stats) {
           const playerStats = stats.playerStats.get(killerId)
           if (playerStats) {
@@ -414,11 +421,14 @@ export class GameEngine {
             killer.skillPoints += 1
           }
         }
-        
+
         const ammoRefundSkill = killer.skillTree.find(s => s.id === 'assault_1a' && s.isSelected)
         if (ammoRefundSkill) {
           gameState.resources.ammo += Math.floor(reward.ammo * 0.3)
         }
+
+        // 检测高光时刻：多杀和Boss击杀
+        this.detectKillHighlights(roomId, killerId, killer.name, zombie.type)
       }
     }
 
@@ -509,6 +519,13 @@ export class GameEngine {
     // Initialize replay recording
     this.replayFrames.set(roomId, [])
     this.replayStartTime.set(roomId, Date.now())
+
+    // Initialize highlight moments tracking
+    this.highlights.set(roomId, [])
+    this.playerKillTimestamps.set(roomId, new Map())
+    this.playerHealthHistory.set(roomId, new Map())
+    this.gateDangerTriggered.set(roomId, new Set())
+    this.teamWipeTriggered.set(roomId, false)
 
     this.startGameLoop(roomId)
     this.startReplayRecording(roomId)
@@ -723,11 +740,16 @@ export class GameEngine {
     const gameState = this.gameStates.get(roomId)
     if (!gameState) return
 
+    const now = Date.now()
+
     for (const player of gameState.players) {
+      // 检测濒死存活
+      this.detectCloseCall(roomId, player)
+
       if (player.isDead) {
         const respawnTime = gameState.timeOfDay === 'day' ? GAME_CONFIG.RESPAWN_TIME_DAY : GAME_CONFIG.RESPAWN_TIME_NIGHT
         const medics = gameState.players.filter(p => p.classType === 'medic' && !p.isDead)
-        
+
         let actualRespawnTime = respawnTime
         if (medics.length > 0) {
           actualRespawnTime /= 2
@@ -746,6 +768,9 @@ export class GameEngine {
         }
       }
     }
+
+    // 检测全灭危机
+    this.detectTeamWipe(roomId)
   }
 
   private updateZombies(roomId: string): void {
@@ -885,6 +910,10 @@ export class GameEngine {
 
       if (getDistance(zombie.position, { x: gateX, y: gateY }) < 25) {
         gate.health -= zombie.damage
+
+        // 检测据点告急
+        this.detectGateDanger(roomId, gate)
+
         return
       }
     }
@@ -896,6 +925,159 @@ export class GameEngine {
           gameState.structures = gameState.structures.filter(s => s.id !== structure.id)
         }
         return
+      }
+    }
+  }
+
+  private detectKillHighlights(roomId: string, killerId: string, killerName: string, zombieType: ZombieType): void {
+    const startTime = this.replayStartTime.get(roomId)
+    if (!startTime) return
+
+    const now = Date.now()
+    const currentTimestamp = now - startTime
+
+    // 检测多杀：3秒内击杀3只及以上僵尸
+    const playerKills = this.playerKillTimestamps.get(roomId)
+    if (!playerKills) return
+
+    let playerTimestamps = playerKills.get(killerId)
+    if (!playerTimestamps) {
+      playerTimestamps = []
+      playerKills.set(killerId, playerTimestamps)
+    }
+
+    // 添加当前击杀时间
+    playerTimestamps.push(now)
+
+    // 清理3秒外的记录
+    const threeSecondsAgo = now - 3000
+    const recentKills = playerTimestamps.filter(t => t > threeSecondsAgo)
+
+    // 只计算普通僵尸的多杀（排除boss）
+    if (zombieType !== 'boss' && recentKills.length >= 3) {
+      const highlights = this.highlights.get(roomId)
+      if (highlights) {
+        // 检查是否已经记录了类似的多杀（避免重复）
+        const existingMultiKill = highlights.find(h =>
+          h.eventType === 'multi_kill' &&
+          h.playerIds.includes(killerId) &&
+          Math.abs(h.timestamp - currentTimestamp) < 3000
+        )
+
+        if (!existingMultiKill) {
+          highlights.push({
+            timestamp: currentTimestamp,
+            eventType: 'multi_kill',
+            playerIds: [killerId],
+            description: `${killerName} 在3秒内击杀了${recentKills.length}只僵尸`
+          })
+        }
+      }
+    }
+
+    // 检测Boss击杀
+    if (zombieType === 'boss') {
+      const highlights = this.highlights.get(roomId)
+      if (highlights) {
+        highlights.push({
+          timestamp: currentTimestamp,
+          eventType: 'boss_kill',
+          playerIds: [killerId],
+          description: `${killerName} 击杀了Boss!`
+        })
+      }
+    }
+  }
+
+  private detectCloseCall(roomId: string, player: PlayerState): void {
+    const startTime = this.replayStartTime.get(roomId)
+    if (!startTime || player.isDead) return
+
+    const currentTimestamp = Date.now() - startTime
+    const healthHistory = this.playerHealthHistory.get(roomId)
+    if (!healthHistory) return
+
+    let history = healthHistory.get(player.id)
+    if (!history) {
+      history = { lowTime: 0, recovered: false }
+      healthHistory.set(player.id, history)
+    }
+
+    const healthPercent = player.health / player.maxHealth
+
+    // 检测血量降到10%以下
+    if (healthPercent <= 0.1 && history.lowTime === 0) {
+      history.lowTime = currentTimestamp
+      history.recovered = false
+    }
+
+    // 检测血量回到50%以上（濒死存活）
+    if (history.lowTime > 0 && !history.recovered && healthPercent >= 0.5) {
+      // 检查是否在5秒内恢复
+      if (currentTimestamp - history.lowTime <= 5000) {
+        const highlights = this.highlights.get(roomId)
+        if (highlights) {
+          highlights.push({
+            timestamp: currentTimestamp,
+            eventType: 'close_call',
+            playerIds: [player.id],
+            description: `${player.name} 濒死状态下成功存活!`
+          })
+        }
+      }
+      history.lowTime = 0
+      history.recovered = true
+    }
+  }
+
+  private detectGateDanger(roomId: string, gate: GateState): void {
+    const startTime = this.replayStartTime.get(roomId)
+    if (!startTime) return
+
+    const currentTimestamp = Date.now() - startTime
+    const gateDangers = this.gateDangerTriggered.get(roomId)
+    if (!gateDangers) return
+
+    const healthPercent = gate.health / gate.maxHealth
+
+    // 检测城门血量降到20%以下
+    if (healthPercent <= 0.2 && !gateDangers.has(gate.id)) {
+      gateDangers.add(gate.id)
+      const highlights = this.highlights.get(roomId)
+      if (highlights) {
+        highlights.push({
+          timestamp: currentTimestamp,
+          eventType: 'gate_danger',
+          playerIds: [],
+          description: `${gate.position}门血量告急! 当前血量${Math.round(healthPercent * 100)}%`
+        })
+      }
+    }
+  }
+
+  private detectTeamWipe(roomId: string): void {
+    const gameState = this.gameStates.get(roomId)
+    if (!gameState) return
+
+    const startTime = this.replayStartTime.get(roomId)
+    if (!startTime) return
+
+    const currentTimestamp = Date.now() - startTime
+    const wasTriggered = this.teamWipeTriggered.get(roomId)
+    if (wasTriggered) return
+
+    // 检测所有玩家同时处于倒地状态
+    const alivePlayers = gameState.players.filter(p => !p.isDead)
+    if (alivePlayers.length === 0 && gameState.players.length > 0) {
+      this.teamWipeTriggered.set(roomId, true)
+      const highlights = this.highlights.get(roomId)
+      if (highlights) {
+        highlights.push({
+          timestamp: currentTimestamp,
+          eventType: 'team_wipe',
+          playerIds: gameState.players.map(p => p.id),
+          description: '队伍全灭! 所有玩家同时倒地!'
+        })
       }
     }
   }
@@ -969,6 +1151,7 @@ export class GameEngine {
     const frames = this.replayFrames.get(roomId)
     const startTime = this.replayStartTime.get(roomId)
     const gameState = this.gameStates.get(roomId)
+    const highlights = this.highlights.get(roomId)
 
     if (!frames || !startTime || !gameState) return
 
@@ -980,11 +1163,12 @@ export class GameEngine {
       duration: endTime - startTime,
       victory: gameState.victory,
       frames,
+      highlights: highlights || [],
     }
 
     try {
       await setReplay(roomId, JSON.stringify(replayData))
-      console.log(`Replay saved for room ${roomId} with ${frames.length} frames`)
+      console.log(`Replay saved for room ${roomId} with ${frames.length} frames and ${highlights?.length || 0} highlights`)
     } catch (error) {
       console.error(`Failed to save replay for room ${roomId}:`, error)
     }
@@ -992,6 +1176,11 @@ export class GameEngine {
     // Clean up replay data
     this.replayFrames.delete(roomId)
     this.replayStartTime.delete(roomId)
+    this.highlights.delete(roomId)
+    this.playerKillTimestamps.delete(roomId)
+    this.playerHealthHistory.delete(roomId)
+    this.gateDangerTriggered.delete(roomId)
+    this.teamWipeTriggered.delete(roomId)
   }
 
   getGameState(roomId: string): GameState | undefined {

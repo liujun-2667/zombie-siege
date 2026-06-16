@@ -194,6 +194,15 @@ export interface DeploymentOrder {
   active: boolean
 }
 
+export type HighlightEventType = 'multi_kill' | 'close_call' | 'boss_kill' | 'gate_danger' | 'team_wipe'
+
+export interface HighlightMoment {
+  timestamp: number
+  eventType: HighlightEventType
+  playerIds: string[]
+  description: string
+}
+
 export interface ReplayFrame {
   timestamp: number
   players: PlayerState[]
@@ -219,6 +228,7 @@ export interface ReplayData {
   duration: number
   victory: boolean
   frames: ReplayFrame[]
+  highlights: HighlightMoment[]
 }
 
 export interface GameState {

@@ -1,97 +1,206 @@
 <template>
   <div v-if="show" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
-    <div class="bg-dark-light rounded-xl w-full max-w-4xl border border-gray overflow-hidden">
-      <!-- Header -->
-      <div class="bg-dark px-6 py-4 flex items-center justify-between border-b border-gray">
-        <div>
-          <h2 class="text-2xl font-bold text-light">战场回放</h2>
-          <p class="text-gray text-sm">
-            {{ formatDate(replayData?.frames[0]?.timestamp) }} · 
-            {{ formatDuration(replayData?.frames[replayData.frames.length - 1]?.timestamp) }} · 
-            {{ replayData?.victory ? '胜利' : '失败' }}
-          </p>
-        </div>
-        <button
-          class="w-10 h-10 rounded-full bg-gray hover:bg-gray-dark text-light flex items-center justify-center transition-all"
-          @click="handleClose"
-        >
-          ✕
-        </button>
-      </div>
-
-      <!-- Canvas Container -->
-      <div class="flex justify-center p-4 bg-dark">
-        <canvas
-          ref="canvasRef"
-          width="600"
-          height="600"
-          class="border border-gray rounded"
-        ></canvas>
-      </div>
-
-      <!-- Playback Controls -->
-      <div class="bg-dark px-6 py-4 border-t border-gray">
-        <!-- Progress Bar -->
-        <div class="mb-4">
-          <input
-            type="range"
-            :min="0"
-            :max="totalTime"
-            :value="currentTime"
-            class="w-full h-2 bg-gray rounded-lg appearance-none cursor-pointer"
-            @input="handleSeek"
-            @mousedown="isDragging = true"
-            @mouseup="isDragging = false"
-          />
-        </div>
-
-        <!-- Control Buttons -->
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <!-- Play/Pause -->
-            <button
-              class="w-12 h-12 rounded-full bg-primary hover:bg-primary-dark text-light flex items-center justify-center transition-all text-xl"
-              @click="togglePlay"
-            >
-              {{ isPlaying ? '⏸' : '▶' }}
-            </button>
-
-            <!-- Time Display -->
-            <div class="text-light font-mono">
-              {{ formatTime(currentTime) }} / {{ formatTime(totalTime) }}
-            </div>
+    <div class="bg-dark-light rounded-xl w-full max-w-5xl border border-gray overflow-hidden flex">
+      <!-- Main Content Area -->
+      <div class="flex-1 flex flex-col">
+        <!-- Header -->
+        <div class="bg-dark px-6 py-4 flex items-center justify-between border-b border-gray">
+          <div>
+            <h2 class="text-2xl font-bold text-light">战场回放</h2>
+            <p class="text-gray text-sm">
+              {{ formatDate(replayData?.frames[0]?.timestamp) }} ·
+              {{ formatDuration(replayData?.frames[replayData.frames.length - 1]?.timestamp) }} ·
+              {{ replayData?.victory ? '胜利' : '失败' }}
+            </p>
           </div>
-
-          <!-- Speed Control -->
-          <div class="flex items-center gap-2">
-            <span class="text-gray text-sm">倍速:</span>
-            <div class="flex gap-1">
-              <button
-                v-for="speed in speeds"
-                :key="speed"
-                class="px-3 py-1 rounded text-sm font-medium transition-all"
-                :class="playbackSpeed === speed ? 'bg-primary text-light' : 'bg-gray text-gray-light hover:bg-gray-dark'"
-                @click="setSpeed(speed)"
-              >
-                {{ speed }}x
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Replay End Message -->
-      <div v-if="replayEnded" class="absolute inset-0 flex items-center justify-center bg-black/70">
-        <div class="bg-dark-light rounded-xl p-8 text-center border border-gray">
-          <div class="text-6xl mb-4">📼</div>
-          <h3 class="text-2xl font-bold text-light mb-2">回放结束</h3>
-          <p class="text-gray mb-4">录像已播放完毕</p>
           <button
-            class="px-6 py-2 bg-primary hover:bg-primary-dark text-light font-semibold rounded-lg transition-all"
-            @click="handleReplayEnd"
+            class="w-10 h-10 rounded-full bg-gray hover:bg-gray-dark text-light flex items-center justify-center transition-all"
+            @click="handleClose"
           >
-            重新播放
+            ✕
           </button>
+        </div>
+
+        <!-- Canvas Container -->
+        <div class="flex justify-center p-4 bg-dark">
+          <canvas
+            ref="canvasRef"
+            width="600"
+            height="600"
+            class="border border-gray rounded"
+          ></canvas>
+        </div>
+
+        <!-- Playback Controls -->
+        <div class="bg-dark px-6 py-4 border-t border-gray">
+          <!-- Highlight Markers on Progress Bar -->
+          <div class="relative mb-2 h-6">
+            <!-- Highlight range for montage mode -->
+            <div
+              v-if="isMontageMode && currentHighlightIndex >= 0"
+              class="absolute top-0 h-full bg-primary/30 rounded"
+              :style="{
+                left: `${(montageStartTime / totalTime) * 100}%`,
+                width: `${((montageEndTime - montageStartTime) / totalTime) * 100}%`
+              }"
+            ></div>
+            <!-- Progress Bar -->
+            <input
+              type="range"
+              :min="0"
+              :max="totalTime"
+              :value="currentTime"
+              class="w-full h-2 bg-gray rounded-lg appearance-none cursor-pointer"
+              @input="handleSeek"
+              @mousedown="isDragging = true"
+              @mouseup="isDragging = false"
+            />
+            <!-- Highlight Dots -->
+            <div
+              v-for="(highlight, index) in replayData?.highlights"
+              :key="index"
+              class="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full cursor-pointer hover:scale-125 transition-transform"
+              :class="getHighlightDotClass(highlight.eventType)"
+              :style="{ left: `${(highlight.timestamp / totalTime) * 100}%`, transform: 'translateX(-50%) translateY(-50%)' }"
+              @click="jumpToHighlight(highlight)"
+              @mouseenter="hoveredHighlight = highlight"
+              @mouseleave="hoveredHighlight = null"
+            >
+              <!-- Tooltip -->
+              <div
+                v-if="hoveredHighlight === highlight"
+                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-dark rounded-lg text-light text-sm whitespace-nowrap z-10"
+              >
+                {{ highlight.description }}
+                <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-dark"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Control Buttons -->
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-4">
+              <!-- Play/Pause -->
+              <button
+                class="w-12 h-12 rounded-full bg-primary hover:bg-primary-dark text-light flex items-center justify-center transition-all text-xl"
+                @click="togglePlay"
+              >
+                {{ isPlaying ? '⏸' : '▶' }}
+              </button>
+
+              <!-- Time Display -->
+              <div class="text-light font-mono">
+                {{ formatTime(currentTime) }} / {{ formatTime(totalTime) }}
+              </div>
+            </div>
+
+            <!-- Speed Control and Montage Button -->
+            <div class="flex items-center gap-4">
+              <!-- Montage Mode Button -->
+              <button
+                v-if="replayData?.highlights && replayData.highlights.length > 0"
+                class="px-4 py-2 rounded font-medium transition-all"
+                :class="isMontageMode ? 'bg-primary text-light' : 'bg-gray text-gray-light hover:bg-gray-dark'"
+                @click="toggleMontageMode"
+              >
+                {{ isMontageMode ? '退出集锦' : '精彩集锦' }}
+              </button>
+
+              <!-- Speed Control -->
+              <div class="flex items-center gap-2">
+                <span class="text-gray text-sm">倍速:</span>
+                <div class="flex gap-1">
+                  <button
+                    v-for="speed in speeds"
+                    :key="speed"
+                    class="px-3 py-1 rounded text-sm font-medium transition-all"
+                    :class="playbackSpeed === speed ? 'bg-primary text-light' : 'bg-gray text-gray-light hover:bg-gray-dark'"
+                    @click="setSpeed(speed)"
+                  >
+                    {{ speed }}x
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Replay End Message -->
+        <div v-if="replayEnded" class="absolute inset-0 flex items-center justify-center bg-black/70">
+          <div class="bg-dark-light rounded-xl p-8 text-center border border-gray">
+            <div class="text-6xl mb-4">📼</div>
+            <h3 class="text-2xl font-bold text-light mb-2">回放结束</h3>
+            <p class="text-gray mb-4">录像已播放完毕</p>
+            <button
+              class="px-6 py-2 bg-primary hover:bg-primary-dark text-light font-semibold rounded-lg transition-all"
+              @click="handleReplayEnd"
+            >
+              重新播放
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Highlights Panel -->
+      <div v-if="replayData?.highlights && replayData.highlights.length > 0" class="w-72 bg-dark border-l border-gray flex flex-col">
+        <!-- Panel Header -->
+        <div class="px-4 py-3 border-b border-gray flex items-center justify-between">
+          <h3 class="text-light font-semibold">精彩集锦</h3>
+          <button
+            class="text-gray hover:text-light transition-colors"
+            @click="showHighlightsPanel = !showHighlightsPanel"
+          >
+            {{ showHighlightsPanel ? '▼' : '▶' }}
+          </button>
+        </div>
+
+        <!-- Stats Summary -->
+        <div v-if="showHighlightsPanel" class="px-4 py-3 border-b border-gray">
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-red-500"></span>
+              <span class="text-gray">多杀 {{ highlightStats.multiKill }}次</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-green-500"></span>
+              <span class="text-gray">濒死存活 {{ highlightStats.closeCall }}次</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+              <span class="text-gray">Boss击杀 {{ highlightStats.bossKill }}次</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+              <span class="text-gray">据点告急 {{ highlightStats.gateDanger }}次</span>
+            </div>
+            <div class="flex items-center gap-2 col-span-2">
+              <span class="w-2 h-2 rounded-full bg-orange-500"></span>
+              <span class="text-gray">全灭危机 {{ highlightStats.teamWipe }}次</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Highlights List -->
+        <div v-if="showHighlightsPanel" class="flex-1 overflow-y-auto">
+          <div
+            v-for="(highlight, index) in sortedHighlights"
+            :key="index"
+            class="px-4 py-3 border-b border-gray hover:bg-gray-dark cursor-pointer transition-colors"
+            :class="{ 'bg-primary/20': currentHighlightIndex === index && isMontageMode }"
+            @click="jumpToHighlight(highlight)"
+          >
+            <div class="flex items-center gap-2 mb-1">
+              <span
+                class="w-2 h-2 rounded-full flex-shrink-0"
+                :class="getHighlightDotClass(highlight.eventType)"
+              ></span>
+              <span class="text-light text-sm">{{ formatTime(highlight.timestamp) }}</span>
+            </div>
+            <p class="text-gray text-sm">{{ highlight.description }}</p>
+            <div v-if="highlight.playerIds.length > 0" class="text-gray-light text-xs mt-1">
+              {{ getPlayerNames(highlight.playerIds) }}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -101,7 +210,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { gameStore, setShowReplayPlayer, setReplayData } from '../stores/gameStore'
-import type { ReplayFrame, PlayerClass } from '../types'
+import type { ReplayFrame, PlayerClass, HighlightMoment, HighlightEventType } from '../types'
 
 const show = computed(() => gameStore.showReplayPlayer)
 const replayData = computed(() => gameStore.replayData)
@@ -112,6 +221,16 @@ const currentTime = ref(0)
 const playbackSpeed = ref(1)
 const isDragging = ref(false)
 const replayEnded = ref(false)
+
+// Montage mode
+const isMontageMode = ref(false)
+const currentHighlightIndex = ref(-1)
+const montageStartTime = ref(0)
+const montageEndTime = ref(0)
+
+// Highlights panel
+const showHighlightsPanel = ref(true)
+const hoveredHighlight = ref<HighlightMoment | null>(null)
 
 const speeds = [0.5, 1, 2, 4]
 
@@ -124,11 +243,51 @@ const totalTime = computed(() => {
   return lastFrame.timestamp
 })
 
+const sortedHighlights = computed(() => {
+  if (!replayData.value?.highlights) return []
+  return [...replayData.value.highlights].sort((a, b) => a.timestamp - b.timestamp)
+})
+
+const highlightStats = computed(() => {
+  const highlights = replayData.value?.highlights || []
+  return {
+    multiKill: highlights.filter(h => h.eventType === 'multi_kill').length,
+    closeCall: highlights.filter(h => h.eventType === 'close_call').length,
+    bossKill: highlights.filter(h => h.eventType === 'boss_kill').length,
+    gateDanger: highlights.filter(h => h.eventType === 'gate_danger').length,
+    teamWipe: highlights.filter(h => h.eventType === 'team_wipe').length,
+  }
+})
+
 const classColors: Record<PlayerClass, string> = {
   assault: '#ef4444',
   engineer: '#eab308',
   medic: '#22c55e',
   commander: '#3b82f6',
+}
+
+const highlightColors: Record<HighlightEventType, string> = {
+  multi_kill: 'bg-red-500',
+  close_call: 'bg-green-500',
+  boss_kill: 'bg-purple-500',
+  gate_danger: 'bg-yellow-500',
+  team_wipe: 'bg-orange-500',
+}
+
+function getHighlightDotClass(eventType: HighlightEventType): string {
+  return highlightColors[eventType] || 'bg-gray-500'
+}
+
+function getPlayerNames(playerIds: string[]): string {
+  if (!replayData.value || playerIds.length === 0) return ''
+  const names: string[] = []
+  for (const id of playerIds) {
+    const player = replayData.value.frames[0]?.players.find(p => p.id === id)
+    if (player) {
+      names.push(player.name)
+    }
+  }
+  return names.join(', ')
 }
 
 function findNearestFrames(time: number): { frameA: ReplayFrame | null; frameB: ReplayFrame | null; t: number } {
@@ -353,10 +512,30 @@ function gameLoop(timestamp: number) {
 
   currentTime.value += deltaTime * playbackSpeed.value
 
+  // Montage mode logic
+  if (isMontageMode.value && currentHighlightIndex.value >= 0) {
+    const highlights = sortedHighlights.value
+    if (currentTime.value >= montageEndTime.value) {
+      // Move to next highlight
+      currentHighlightIndex.value++
+      if (currentHighlightIndex.value >= highlights.length) {
+        // End of montage
+        isMontageMode.value = false
+        currentHighlightIndex.value = -1
+        isPlaying.value = false
+        currentTime.value = totalTime.value
+        return
+      }
+      setupMontageSegment()
+    }
+  }
+
   if (currentTime.value >= totalTime.value) {
     currentTime.value = totalTime.value
     isPlaying.value = false
-    replayEnded.value = true
+    if (!isMontageMode.value) {
+      replayEnded.value = true
+    }
   }
 
   renderFrame(currentTime.value)
@@ -366,8 +545,21 @@ function gameLoop(timestamp: number) {
   }
 }
 
+function setupMontageSegment() {
+  const highlights = sortedHighlights.value
+  if (currentHighlightIndex.value < 0 || currentHighlightIndex.value >= highlights.length) return
+
+  const highlight = highlights[currentHighlightIndex.value]
+  // Play 2 seconds before and 2 seconds after the highlight
+  montageStartTime.value = Math.max(0, highlight.timestamp - 2000)
+  montageEndTime.value = Math.min(totalTime.value, highlight.timestamp + 2000)
+  currentTime.value = montageStartTime.value
+
+  renderFrame(currentTime.value)
+}
+
 function togglePlay() {
-  if (replayEnded.value) {
+  if (replayEnded.value && !isMontageMode.value) {
     currentTime.value = 0
     replayEnded.value = false
   }
@@ -395,6 +587,35 @@ function setSpeed(speed: number) {
   playbackSpeed.value = speed
 }
 
+function jumpToHighlight(highlight: HighlightMoment) {
+  currentTime.value = highlight.timestamp
+  renderFrame(currentTime.value)
+  if (!isPlaying.value) {
+    // Optionally auto-play from this point
+  }
+}
+
+function toggleMontageMode() {
+  isMontageMode.value = !isMontageMode.value
+  if (isMontageMode.value) {
+    // Enter montage mode, start from first highlight
+    currentHighlightIndex.value = 0
+    setupMontageSegment()
+    // Auto-play
+    isPlaying.value = true
+    lastFrameTime = 0
+    animationFrameId = requestAnimationFrame(gameLoop)
+  } else {
+    // Exit montage mode
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId)
+      animationFrameId = null
+    }
+    isPlaying.value = false
+    currentHighlightIndex.value = -1
+  }
+}
+
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000)
   const minutes = Math.floor(seconds / 60)
@@ -415,6 +636,8 @@ function formatDate(timestamp: number | undefined): string {
 
 function handleClose() {
   isPlaying.value = false
+  isMontageMode.value = false
+  currentHighlightIndex.value = -1
   if (animationFrameId !== null) {
     cancelAnimationFrame(animationFrameId)
     animationFrameId = null
@@ -435,7 +658,10 @@ watch(show, (newVal) => {
     isPlaying.value = false
     playbackSpeed.value = 1
     replayEnded.value = false
+    isMontageMode.value = false
+    currentHighlightIndex.value = -1
     lastFrameTime = 0
+    showHighlightsPanel.value = true
     renderFrame(0)
   }
 })
